@@ -227,12 +227,19 @@ impl Game {
                     .rotate(limb.rotation + baby.rotation);
             let new_body_pos = ground_pos
                 + (old_body_pos - ground_pos - delta).normalize() * limb_config.touch_ground.len();
+            limb.rotation = (ground_pos - new_body_pos).arg() - limb.angle - baby.rotation;
+            limb.rotation = limb.rotation.clamp_abs(Angle::from_degrees(
+                self.assets.config.baby.limb_rotation_limit,
+            ));
+            let new_body_pos = ground_pos
+                - limb_config
+                    .touch_ground
+                    .rotate(limb.rotation + baby.rotation);
             if ground_control {
                 let rotation = (new_body_pos - baby.pos).arg() - (old_body_pos - baby.pos).arg();
                 baby.rotation += rotation;
                 baby.pos += new_body_pos - (baby.pos + (old_body_pos - baby.pos).rotate(rotation));
             }
-            limb.rotation = (ground_pos - new_body_pos).arg() - limb.angle - baby.rotation;
             // limb.rotation = angle - limb.angle;
         }
     }
