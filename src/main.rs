@@ -25,6 +25,8 @@ struct BabyConfig {
     head_offset: vec2<f32>,
     limb_rotation_limit: f32,
     limb_length: f32,
+    max_head_rotation: f32,
+    head_rotation_k: f32,
     limbs: HashMap<Limb, LimbConfig>,
 }
 
@@ -107,6 +109,7 @@ struct LimbState {
 struct Baby {
     pos: vec2<f32>,
     rotation: Angle<f32>,
+    head_rotation: Angle<f32>,
     radius: f32,
     limbs: HashMap<Limb, LimbState>,
 }
@@ -116,6 +119,7 @@ impl Baby {
         Self {
             pos,
             rotation: Angle::ZERO,
+            head_rotation: Angle::ZERO,
             radius: assets.config.baby.radius,
             limbs: {
                 let mut map = HashMap::new();
@@ -191,12 +195,25 @@ impl Game {
         self.geng.draw2d().draw2d(
             framebuffer,
             &self.camera,
-            &draw2d::TexturedQuad::unit(&self.assets.baby.head)
-                .transform(transform * mat3::translate(self.assets.config.baby.head_offset)),
+            &draw2d::TexturedQuad::unit(&self.assets.baby.head).transform(
+                transform
+                    * mat3::translate(self.assets.config.baby.head_offset)
+                    * mat3::rotate(baby.head_rotation),
+            ),
         );
     }
 
-    fn limb_control(&mut self, cursor_pos: vec2<f32>) {
+    fn baby_control(&mut self, cursor_pos: vec2<f32>) {
+        let baby = &mut self.baby;
+        baby.head_rotation = (((cursor_pos - (baby.pos + self.assets.config.baby.head_offset))
+            .arg()
+            - baby.rotation
+            - Angle::from_degrees(90.0))
+        .normalized_pi()
+            * self.assets.config.baby.head_rotation_k)
+            .clamp_abs(Angle::from_degrees(
+                self.assets.config.baby.max_head_rotation,
+            ));
         let delta = (cursor_pos - self.prev_cursor_pos) * self.assets.config.sensitivity;
         let air_control = self
             .geng
@@ -207,7 +224,6 @@ impl Game {
             .window()
             .is_button_pressed(geng::MouseButton::Left);
         if air_control || ground_control {
-            let baby = &mut self.baby;
             let angle = (cursor_pos - baby.pos).arg();
             let limb = Limb::all()
                 .min_by_key(|limb| {
@@ -264,7 +280,7 @@ impl geng::State for Game {
         let cursor_pos = self
             .camera
             .screen_to_world(self.framebuffer_size, cursor_window_pos.map(|x| x as f32));
-        self.limb_control(cursor_pos);
+        self.baby_control(cursor_pos);
 
         self.prev_cursor_pos = cursor_pos;
     }

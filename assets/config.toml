@@ -5,6 +5,8 @@ sensitivity = 0.1
 [baby]
 radius = 1
 head_offset = [0, 1]
+max_head_rotation = 40
+head_rotation_k = 0.3
 arm_offset = [-0.5, 0.5]
 leg_offset = [-0.4, -0.8]
 limb_rotation_limit = 30
