@@ -14,6 +14,7 @@ struct BabyConfig {
     arm_offset: vec2<f32>,
     leg_offset: vec2<f32>,
     limb_rotation_limit: f32,
+    limb_angles: HashMap<Limb, f32>,
 }
 
 #[derive(geng::asset::Load, Deserialize)]
@@ -66,7 +67,7 @@ struct Assets {
     baby: BabyAssets,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
 enum Limb {
     LeftArm,
     RightArm,
@@ -74,8 +75,15 @@ enum Limb {
     RightLeg,
 }
 
+impl Limb {
+    fn all() -> impl Iterator<Item = Self> {
+        [Self::LeftArm, Self::RightArm, Self::LeftLeg, Self::RightLeg].into_iter()
+    }
+}
+
 struct LimbState {
     rotation: Angle<f32>,
+    angle: Angle<f32>,
 }
 
 struct Baby {
@@ -93,11 +101,12 @@ impl Baby {
             radius: assets.config.baby.radius,
             limbs: {
                 let mut map = HashMap::new();
-                for limb in [Limb::LeftArm, Limb::RightArm, Limb::LeftLeg, Limb::RightLeg] {
+                for limb in Limb::all() {
                     map.insert(
                         limb,
                         LimbState {
                             rotation: Angle::ZERO,
+                            angle: Angle::from_degrees(assets.config.baby.limb_angles[&limb]),
                         },
                     );
                 }
@@ -113,6 +122,7 @@ struct Game {
     baby: Baby,
     camera: Camera2d,
     time: f32,
+    framebuffer_size: vec2<f32>,
 }
 
 impl Game {
@@ -127,6 +137,7 @@ impl Game {
                 fov: Camera2dFov::MinSide(assets.config.fov),
             },
             time: 0.0,
+            framebuffer_size: vec2::splat(1.0),
         }
     }
 
@@ -188,6 +199,7 @@ impl Game {
 
 impl geng::State for Game {
     fn draw(&mut self, framebuffer: &mut ugli::Framebuffer) {
+        self.framebuffer_size = framebuffer.size().map(|x| x as f32);
         ugli::clear(
             framebuffer,
             Some(self.assets.config.background_color),
@@ -199,9 +211,26 @@ impl geng::State for Game {
     fn update(&mut self, delta_time: f64) {
         let delta_time = delta_time as f32;
         self.time += delta_time;
-        for limb in self.baby.limbs.values_mut() {
-            limb.rotation =
-                Angle::from_degrees(self.time.sin() * self.assets.config.baby.limb_rotation_limit);
+        let cursor_window_pos = self.geng.window().cursor_position().unwrap_or(vec2::ZERO);
+        let cursor_pos = self
+            .camera
+            .screen_to_world(self.framebuffer_size, cursor_window_pos.map(|x| x as f32));
+        if self
+            .geng
+            .window()
+            .is_button_pressed(geng::MouseButton::Left)
+        {
+            let angle = (cursor_pos - self.baby.pos).arg();
+            let limb = Limb::all()
+                .min_by_key(|limb| {
+                    (angle - self.baby.limbs[limb].angle)
+                        .normalized_pi()
+                        .abs()
+                        .map(r32)
+                })
+                .unwrap();
+            let limb = &mut self.baby.limbs.get_mut(&limb).unwrap();
+            limb.rotation = angle - limb.angle;
         }
     }
 }
