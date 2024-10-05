@@ -7,8 +7,24 @@ head_offset = [0, 1]
 arm_offset = [-0.5, 0.5]
 leg_offset = [-0.4, -0.8]
 limb_rotation_limit = 30
-[baby.limb_angles]
-RightArm = 45
-LeftArm = 135
-RightLeg = -45
-LeftLeg = -135
+limb_length = 0.5
+[baby.limbs.RightArm]
+angle = 45
+body_pos = [0.5, 0.5]
+touch_ground = [0.5, 0.5]
+flip = true
+[baby.limbs.LeftArm]
+angle = 135
+body_pos = [-0.5, 0.5]
+touch_ground = [-0.5, 0.5]
+flip = false
+[baby.limbs.RightLeg]
+angle = -45
+body_pos = [0.4, -0.7]
+touch_ground = [0.5, -0.5]
+flip = true
+[baby.limbs.LeftLeg]
+angle = -135
+body_pos = [-0.4, -0.7]
+touch_ground = [-0.5, -0.5]
+flip = false

@@ -8,13 +8,24 @@ struct CliArgs {
 }
 
 #[derive(Deserialize)]
+struct LimbConfig {
+    /// degrees
+    angle: f32,
+    /// Where we are attached to the body
+    body_pos: vec2<f32>,
+    /// relative to body_pos
+    touch_ground: vec2<f32>,
+    /// wether to flip the texture
+    flip: bool,
+}
+
+#[derive(Deserialize)]
 struct BabyConfig {
     radius: f32,
     head_offset: vec2<f32>,
-    arm_offset: vec2<f32>,
-    leg_offset: vec2<f32>,
     limb_rotation_limit: f32,
-    limb_angles: HashMap<Limb, f32>,
+    limb_length: f32,
+    limbs: HashMap<Limb, LimbConfig>,
 }
 
 #[derive(geng::asset::Load, Deserialize)]
@@ -76,6 +87,12 @@ enum Limb {
 }
 
 impl Limb {
+    fn is_leg(&self) -> bool {
+        match self {
+            Limb::LeftArm | Limb::RightArm => false,
+            Limb::LeftLeg | Limb::RightLeg => true,
+        }
+    }
     fn all() -> impl Iterator<Item = Self> {
         [Self::LeftArm, Self::RightArm, Self::LeftLeg, Self::RightLeg].into_iter()
     }
@@ -106,7 +123,7 @@ impl Baby {
                         limb,
                         LimbState {
                             rotation: Angle::ZERO,
-                            angle: Angle::from_degrees(assets.config.baby.limb_angles[&limb]),
+                            angle: Angle::from_degrees(assets.config.baby.limbs[&limb].angle),
                         },
                     );
                 }
@@ -145,44 +162,24 @@ impl Game {
         let transform = mat3::translate(baby.pos)
             * mat3::rotate(baby.rotation)
             * mat3::scale_uniform(baby.radius);
-        self.geng.draw2d().draw2d(
-            framebuffer,
-            &self.camera,
-            &draw2d::TexturedQuad::unit(&self.assets.baby.arm).transform(
-                transform
-                    * mat3::translate(self.assets.config.baby.arm_offset)
-                    * mat3::rotate(baby.limbs[&Limb::LeftArm].rotation),
-            ),
-        );
-        self.geng.draw2d().draw2d(
-            framebuffer,
-            &self.camera,
-            &draw2d::TexturedQuad::unit(&self.assets.baby.arm).transform(
-                transform
-                    * mat3::scale(vec2(-1.0, 1.0))
-                    * mat3::translate(self.assets.config.baby.arm_offset)
-                    * mat3::rotate(-baby.limbs[&Limb::RightArm].rotation),
-            ),
-        );
-        self.geng.draw2d().draw2d(
-            framebuffer,
-            &self.camera,
-            &draw2d::TexturedQuad::unit(&self.assets.baby.leg).transform(
-                transform
-                    * mat3::translate(self.assets.config.baby.leg_offset)
-                    * mat3::rotate(baby.limbs[&Limb::LeftLeg].rotation),
-            ),
-        );
-        self.geng.draw2d().draw2d(
-            framebuffer,
-            &self.camera,
-            &draw2d::TexturedQuad::unit(&self.assets.baby.leg).transform(
-                transform
-                    * mat3::scale(vec2(-1.0, 1.0))
-                    * mat3::translate(self.assets.config.baby.leg_offset)
-                    * mat3::rotate(-baby.limbs[&Limb::RightLeg].rotation),
-            ),
-        );
+        for limb in Limb::all() {
+            let texture = match limb.is_leg() {
+                true => &self.assets.baby.leg,
+                false => &self.assets.baby.arm,
+            };
+            let config = &self.assets.config.baby.limbs[&limb];
+            let limb = &baby.limbs[&limb];
+            self.geng.draw2d().draw2d(
+                framebuffer,
+                &self.camera,
+                &draw2d::TexturedQuad::unit(texture).transform(
+                    transform
+                        * mat3::translate(config.body_pos)
+                        * mat3::rotate(limb.rotation)
+                        * mat3::scale(vec2(if config.flip { -1.0 } else { 1.0 }, 1.0)),
+                ),
+            );
+        }
         self.geng.draw2d().draw2d(
             framebuffer,
             &self.camera,
@@ -194,6 +191,41 @@ impl Game {
             &draw2d::TexturedQuad::unit(&self.assets.baby.head)
                 .transform(transform * mat3::translate(self.assets.config.baby.head_offset)),
         );
+    }
+
+    fn limb_control(&mut self, cursor_pos: vec2<f32>) {
+        if self
+            .geng
+            .window()
+            .is_button_pressed(geng::MouseButton::Left)
+        {
+            let baby = &mut self.baby;
+            let angle = (cursor_pos - baby.pos).arg();
+            let limb = Limb::all()
+                .min_by_key(|limb| {
+                    (angle - baby.rotation - baby.limbs[limb].angle)
+                        .normalized_pi()
+                        .abs()
+                        .map(r32)
+                })
+                .unwrap();
+            let limb_config = &self.assets.config.baby.limbs[&limb];
+            let limb = &mut baby.limbs.get_mut(&limb).unwrap();
+            let old_body_pos = baby.pos + limb_config.body_pos.rotate(baby.rotation);
+            let ground_pos = old_body_pos
+                + limb_config
+                    .touch_ground
+                    .rotate(limb.rotation + baby.rotation);
+            if (ground_pos - cursor_pos).len() < 1e-3 {
+                return;
+            }
+            let new_body_pos =
+                ground_pos + (ground_pos - cursor_pos).normalize() * limb_config.touch_ground.len();
+            baby.pos += new_body_pos - old_body_pos;
+            limb.rotation =
+                (cursor_pos - ground_pos).arg() - limb_config.touch_ground.arg() - baby.rotation;
+            // limb.rotation = angle - limb.angle;
+        }
     }
 }
 
@@ -215,23 +247,7 @@ impl geng::State for Game {
         let cursor_pos = self
             .camera
             .screen_to_world(self.framebuffer_size, cursor_window_pos.map(|x| x as f32));
-        if self
-            .geng
-            .window()
-            .is_button_pressed(geng::MouseButton::Left)
-        {
-            let angle = (cursor_pos - self.baby.pos).arg();
-            let limb = Limb::all()
-                .min_by_key(|limb| {
-                    (angle - self.baby.limbs[limb].angle)
-                        .normalized_pi()
-                        .abs()
-                        .map(r32)
-                })
-                .unwrap();
-            let limb = &mut self.baby.limbs.get_mut(&limb).unwrap();
-            limb.rotation = angle - limb.angle;
-        }
+        self.limb_control(cursor_pos);
     }
 }
 
