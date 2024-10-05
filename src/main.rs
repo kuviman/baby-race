@@ -33,6 +33,7 @@ struct BabyConfig {
 struct Config {
     background_color: Rgba<f32>,
     fov: f32,
+    sensitivity: f32,
     baby: BabyConfig,
 }
 
@@ -140,6 +141,7 @@ struct Game {
     camera: Camera2d,
     time: f32,
     framebuffer_size: vec2<f32>,
+    prev_cursor_pos: vec2<f32>,
 }
 
 impl Game {
@@ -155,6 +157,7 @@ impl Game {
             },
             time: 0.0,
             framebuffer_size: vec2::splat(1.0),
+            prev_cursor_pos: vec2::ZERO,
         }
     }
 
@@ -194,6 +197,7 @@ impl Game {
     }
 
     fn limb_control(&mut self, cursor_pos: vec2<f32>) {
+        let delta = (cursor_pos - self.prev_cursor_pos) * self.assets.config.sensitivity;
         if self
             .geng
             .window()
@@ -211,19 +215,16 @@ impl Game {
                 .unwrap();
             let limb_config = &self.assets.config.baby.limbs[&limb];
             let limb = &mut baby.limbs.get_mut(&limb).unwrap();
+
             let old_body_pos = baby.pos + limb_config.body_pos.rotate(baby.rotation);
             let ground_pos = old_body_pos
                 + limb_config
                     .touch_ground
                     .rotate(limb.rotation + baby.rotation);
-            if (ground_pos - cursor_pos).len() < 1e-3 {
-                return;
-            }
-            let new_body_pos =
-                ground_pos + (ground_pos - cursor_pos).normalize() * limb_config.touch_ground.len();
+            let new_body_pos = ground_pos
+                + (old_body_pos - ground_pos - delta).normalize() * limb_config.touch_ground.len();
             baby.pos += new_body_pos - old_body_pos;
-            limb.rotation =
-                (cursor_pos - ground_pos).arg() - limb_config.touch_ground.arg() - baby.rotation;
+            limb.rotation = (ground_pos - new_body_pos).arg() - limb.angle - baby.rotation;
             // limb.rotation = angle - limb.angle;
         }
     }
@@ -248,6 +249,8 @@ impl geng::State for Game {
             .camera
             .screen_to_world(self.framebuffer_size, cursor_window_pos.map(|x| x as f32));
         self.limb_control(cursor_pos);
+
+        self.prev_cursor_pos = cursor_pos;
     }
 }
 

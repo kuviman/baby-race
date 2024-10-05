@@ -1,5 +1,6 @@
 background_color = "#777"
 fov = 20
+sensitivity = 0.1
 
 [baby]
 radius = 1
