@@ -1,6 +1,9 @@
 background_color = "#777"
-fov = 20
 sensitivity = 0.1
+
+[camera]
+fov = 20
+speed = 10
 
 [baby]
 radius = 1

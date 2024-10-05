@@ -40,11 +40,17 @@ struct BabyConfig {
     limbs: HashMap<Limb, LimbConfig>,
 }
 
+#[derive(Deserialize)]
+struct CameraConfig {
+    fov: f32,
+    speed: f32,
+}
+
 #[derive(geng::asset::Load, Deserialize)]
 #[load(serde = "toml")]
 struct Config {
     background_color: Rgba<f32>,
-    fov: f32,
+    camera: CameraConfig,
     sensitivity: f32,
     baby: BabyConfig,
 }
@@ -189,7 +195,7 @@ impl Game {
             camera: Camera2d {
                 center: vec2::ZERO,
                 rotation: Angle::ZERO,
-                fov: Camera2dFov::MinSide(assets.config.fov),
+                fov: Camera2dFov::MinSide(assets.config.camera.fov),
             },
             time: 0.0,
             framebuffer_size: vec2::splat(1.0),
@@ -343,6 +349,8 @@ impl geng::State for Game {
             .camera
             .screen_to_world(self.framebuffer_size, cursor_window_pos.map(|x| x as f32));
         self.baby_control(cursor_pos);
+        self.camera.center += (self.baby.pos - self.camera.center)
+            * (delta_time * self.assets.config.camera.speed).min(1.0);
 
         self.prev_cursor_pos = cursor_pos;
     }
