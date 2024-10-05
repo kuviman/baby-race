@@ -227,7 +227,8 @@ impl Game {
                     .rotate(limb.rotation + baby.rotation);
             let new_body_pos = ground_pos
                 + (old_body_pos - ground_pos - delta).normalize() * limb_config.touch_ground.len();
-            limb.rotation = (ground_pos - new_body_pos).arg() - limb.angle - baby.rotation;
+            limb.rotation =
+                ((ground_pos - new_body_pos).arg() - limb.angle - baby.rotation).normalized_pi();
             limb.rotation = limb.rotation.clamp_abs(Angle::from_degrees(
                 self.assets.config.baby.limb_rotation_limit,
             ));
@@ -270,6 +271,8 @@ impl geng::State for Game {
 }
 
 fn main() {
+    geng::setup_panic_handler();
+    logger::init();
     let cli_args: CliArgs = cli::parse();
     Geng::run_with(
         &{
