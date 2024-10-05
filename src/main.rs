@@ -7,8 +7,16 @@ struct CliArgs {
     geng: geng::CliArgs,
 }
 
+#[derive(geng::asset::Load, Deserialize)]
+#[load(serde = "toml")]
+struct Config {
+    background_color: Rgba<f32>,
+}
+
 #[derive(geng::asset::Load)]
-struct Assets {}
+struct Assets {
+    config: Config,
+}
 
 struct Game {
     geng: Geng,
@@ -26,7 +34,12 @@ impl Game {
 
 impl geng::State for Game {
     fn draw(&mut self, framebuffer: &mut ugli::Framebuffer) {
-        ugli::clear(framebuffer, Some(Rgba::GREEN), None, None);
+        ugli::clear(
+            framebuffer,
+            Some(self.assets.config.background_color),
+            None,
+            None,
+        );
     }
 }
 
