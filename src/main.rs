@@ -161,6 +161,7 @@ struct Game {
     framebuffer_size: vec2<f32>,
     prev_cursor_pos: vec2<f32>,
     connection: Connection,
+    locked_limb: Option<Limb>,
 }
 
 type Connection = geng::net::client::Connection<ServerMessage, ClientMessage>;
@@ -193,6 +194,7 @@ impl Game {
             time: 0.0,
             framebuffer_size: vec2::splat(1.0),
             prev_cursor_pos: vec2::ZERO,
+            locked_limb: None,
         }
     }
 
@@ -256,14 +258,18 @@ impl Game {
             .is_button_pressed(geng::MouseButton::Left);
         if air_control || ground_control {
             let angle = (cursor_pos - baby.pos).arg();
-            let limb = Limb::all()
-                .min_by_key(|limb| {
-                    (angle - baby.rotation - baby.limbs[limb].angle)
-                        .normalized_pi()
-                        .abs()
-                        .map(r32)
-                })
-                .unwrap();
+            let limb = match self.locked_limb {
+                Some(limb) => limb,
+                None => Limb::all()
+                    .min_by_key(|limb| {
+                        (angle - baby.rotation - baby.limbs[limb].angle)
+                            .normalized_pi()
+                            .abs()
+                            .map(r32)
+                    })
+                    .unwrap(),
+            };
+            self.locked_limb = Some(limb);
             let limb_config = &self.assets.config.baby.limbs[&limb];
             let limb = &mut baby.limbs.get_mut(&limb).unwrap();
 
@@ -289,6 +295,8 @@ impl Game {
                 baby.pos += new_body_pos - (baby.pos + (old_body_pos - baby.pos).rotate(rotation));
             }
             // limb.rotation = angle - limb.angle;
+        } else {
+            self.locked_limb = None;
         }
     }
     fn handler_multiplayer(&mut self) {
