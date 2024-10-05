@@ -15,7 +15,15 @@ struct State {
 
 impl State {
     fn find_new_spawn_pos(&self) -> vec2<f32> {
-        vec2::ZERO
+        let mut used_x = HashSet::new();
+        for baby in self.babies.values() {
+            used_x.insert(baby.pos.x.round() as i32);
+        }
+        let unused_x = (0..)
+            .flat_map(|abs| [-abs, abs])
+            .find(|x| !used_x.contains(x))
+            .unwrap();
+        vec2(unused_x as f32, 0.0)
     }
     fn tick(&mut self) {
         if self.next_race_timer.elapsed().as_secs_f64() > self.config.race_timer {
@@ -64,6 +72,14 @@ pub struct Client {
     id: ClientId,
     state: Arc<Mutex<State>>,
     sender: Box<dyn geng::net::Sender<ServerMessage>>,
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        let mut state = self.state.lock().unwrap();
+        state.babies.remove(&self.id);
+        state.next_race.remove(&self.id);
+    }
 }
 
 impl geng::net::Receiver<ClientMessage> for Client {

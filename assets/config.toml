@@ -14,7 +14,7 @@ fov = 20
 speed = 10
 
 [baby]
-radius = 1
+radius = 0.5
 head_offset = [0, 1]
 max_head_rotation = 40
 head_rotation_k = 0.3
