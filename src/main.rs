@@ -228,7 +228,9 @@ impl Game {
             let new_body_pos = ground_pos
                 + (old_body_pos - ground_pos - delta).normalize() * limb_config.touch_ground.len();
             if ground_control {
-                baby.pos += new_body_pos - old_body_pos;
+                let rotation = (new_body_pos - baby.pos).arg() - (old_body_pos - baby.pos).arg();
+                baby.rotation += rotation;
+                baby.pos += new_body_pos - (baby.pos + (old_body_pos - baby.pos).rotate(rotation));
             }
             limb.rotation = (ground_pos - new_body_pos).arg() - limb.angle - baby.rotation;
             // limb.rotation = angle - limb.angle;
