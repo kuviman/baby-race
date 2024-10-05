@@ -1,8 +1,18 @@
 #![allow(dead_code)]
 use geng::prelude::*;
 
+mod interop;
+#[cfg(not(target_arch = "wasm32"))]
+mod server;
+
+use interop::*;
+
 #[derive(clap::Parser)]
 struct CliArgs {
+    #[clap(long)]
+    pub server: Option<String>,
+    #[clap(long)]
+    pub connect: Option<String>,
     #[clap(flatten)]
     geng: geng::CliArgs,
 }
@@ -146,11 +156,15 @@ struct Game {
     time: f32,
     framebuffer_size: vec2<f32>,
     prev_cursor_pos: vec2<f32>,
+    connection: Connection,
 }
 
+type Connection = geng::net::client::Connection<ServerMessage, ClientMessage>;
+
 impl Game {
-    pub fn new(geng: &Geng, assets: &Rc<Assets>) -> Self {
+    pub fn new(geng: &Geng, assets: &Rc<Assets>, connection: Connection) -> Self {
         Self {
+            connection,
             geng: geng.clone(),
             assets: assets.clone(),
             baby: Baby::new(assets, vec2::ZERO),
@@ -289,20 +303,76 @@ impl geng::State for Game {
 fn main() {
     geng::setup_panic_handler();
     logger::init();
-    let cli_args: CliArgs = cli::parse();
-    Geng::run_with(
-        &{
-            let mut options = geng::ContextOptions::default();
-            options.with_cli(&cli_args.geng);
-            options
-        },
-        |geng: Geng| async move {
+    let mut cli_args: CliArgs = cli::parse();
+    if cli_args.connect.is_none() && cli_args.server.is_none() {
+        #[cfg(target_arch = "wasm32")]
+        {
+            cli_args.connect = Some(
+                option_env!("CONNECT")
+                    .filter(|addr| !addr.is_empty())
+                    .map(|addr| addr.to_owned())
+                    .unwrap_or_else(|| {
+                        let window = web_sys::window().unwrap();
+                        let location = window.location();
+                        let mut new_uri = String::new();
+                        if location.protocol().unwrap() == "https" {
+                            new_uri += "wss://";
+                        } else {
+                            new_uri += "ws://";
+                        }
+                        new_uri += &location.host().unwrap();
+                        new_uri += &location.pathname().unwrap();
+                        new_uri
+                    }),
+            );
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            cli_args.server = Some("127.0.0.1:1155".to_owned());
+            cli_args.connect = Some("ws://127.0.0.1:1155".to_owned());
+        }
+    }
+
+    if cli_args.server.is_some() && cli_args.connect.is_none() {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let server =
+                geng::net::Server::new(server::App::new(), cli_args.server.as_deref().unwrap());
+            let server_handle = server.handle();
+            ctrlc::set_handler(move || server_handle.shutdown()).unwrap();
+            server.run();
+        }
+    } else {
+        #[cfg(not(target_arch = "wasm32"))]
+        let server = if let Some(addr) = &cli_args.server {
+            let server = geng::net::Server::new(server::App::new(), addr);
+            let server_handle = server.handle();
+            let server_thread = std::thread::spawn(move || {
+                server.run();
+            });
+            Some((server_handle, server_thread))
+        } else {
+            None
+        };
+
+        let mut geng_options = geng::ContextOptions::default();
+        geng_options.with_cli(&cli_args.geng);
+        Geng::run_with(&geng_options, move |geng| async move {
+            let connection = geng::net::client::connect(&cli_args.connect.unwrap())
+                .await
+                .unwrap();
             let assets = geng
                 .asset_manager()
                 .load(run_dir().join("assets"))
                 .await
                 .expect("failed to load assets");
-            geng.run_state(Game::new(&geng, &assets)).await
-        },
-    )
+            geng.run_state(Game::new(&geng, &assets, connection)).await
+        });
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some((server_handle, server_thread)) = server {
+            server_handle.shutdown();
+            server_thread.join().unwrap();
+        }
+    }
 }

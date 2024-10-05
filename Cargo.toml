@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+ctrlc = "3.4.5"
 evenio = "0.6"
 geng.git = "https://github.com/geng-engine/geng"
 serde = "1"
