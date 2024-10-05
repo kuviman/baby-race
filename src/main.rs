@@ -198,11 +198,15 @@ impl Game {
 
     fn limb_control(&mut self, cursor_pos: vec2<f32>) {
         let delta = (cursor_pos - self.prev_cursor_pos) * self.assets.config.sensitivity;
-        if self
+        let air_control = self
             .geng
             .window()
-            .is_button_pressed(geng::MouseButton::Left)
-        {
+            .is_button_pressed(geng::MouseButton::Right);
+        let ground_control = self
+            .geng
+            .window()
+            .is_button_pressed(geng::MouseButton::Left);
+        if air_control || ground_control {
             let baby = &mut self.baby;
             let angle = (cursor_pos - baby.pos).arg();
             let limb = Limb::all()
@@ -223,7 +227,9 @@ impl Game {
                     .rotate(limb.rotation + baby.rotation);
             let new_body_pos = ground_pos
                 + (old_body_pos - ground_pos - delta).normalize() * limb_config.touch_ground.len();
-            baby.pos += new_body_pos - old_body_pos;
+            if ground_control {
+                baby.pos += new_body_pos - old_body_pos;
+            }
             limb.rotation = (ground_pos - new_body_pos).arg() - limb.angle - baby.rotation;
             // limb.rotation = angle - limb.angle;
         }
