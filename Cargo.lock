@@ -426,6 +426,7 @@ dependencies = [
  "evenio",
  "geng",
  "serde",
+ "web-sys",
 ]
 
 [[package]]

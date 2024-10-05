@@ -91,7 +91,7 @@ struct Assets {
     baby: BabyAssets,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 enum Limb {
     LeftArm,
     RightArm,
@@ -111,11 +111,13 @@ impl Limb {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct LimbState {
     rotation: Angle<f32>,
     angle: Angle<f32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Baby {
     pos: vec2<f32>,
     rotation: Angle<f32>,
@@ -149,9 +151,11 @@ impl Baby {
 }
 
 struct Game {
+    my_id: ClientId,
     geng: Geng,
     assets: Rc<Assets>,
     baby: Baby,
+    other_babies: HashMap<ClientId, Baby>,
     camera: Camera2d,
     time: f32,
     framebuffer_size: vec2<f32>,
@@ -162,12 +166,25 @@ struct Game {
 type Connection = geng::net::client::Connection<ServerMessage, ClientMessage>;
 
 impl Game {
-    pub fn new(geng: &Geng, assets: &Rc<Assets>, connection: Connection) -> Self {
+    pub async fn new(geng: &Geng, assets: &Rc<Assets>, mut connection: Connection) -> Self {
+        let ServerMessage::Auth { id: my_id } = connection.next().await.unwrap().unwrap() else {
+            unreachable!()
+        };
+        let ServerMessage::Spawn(spawn_pos) = connection
+            .next()
+            .await
+            .expect("server connection failure")
+            .unwrap()
+        else {
+            unreachable!()
+        };
         Self {
+            my_id,
             connection,
             geng: geng.clone(),
             assets: assets.clone(),
-            baby: Baby::new(assets, vec2::ZERO),
+            baby: Baby::new(assets, spawn_pos),
+            other_babies: HashMap::new(),
             camera: Camera2d {
                 center: vec2::ZERO,
                 rotation: Angle::ZERO,
@@ -274,6 +291,25 @@ impl Game {
             // limb.rotation = angle - limb.angle;
         }
     }
+    fn handler_multiplayer(&mut self) {
+        let new_messages: Vec<_> = self.connection.new_messages().collect();
+        for message in new_messages {
+            let message = message.expect("server connection failure");
+            match message {
+                ServerMessage::Spawn(pos) => self.baby = Baby::new(&self.assets, pos),
+                ServerMessage::StateSync { babies } => {
+                    self.other_babies = babies
+                        .into_iter()
+                        .filter(|&(id, _)| id != self.my_id)
+                        .collect();
+                    self.connection.send(ClientMessage::StateSync {
+                        baby: self.baby.clone(),
+                    })
+                }
+                ServerMessage::Auth { .. } => unreachable!(),
+            }
+        }
+    }
 }
 
 impl geng::State for Game {
@@ -285,9 +321,13 @@ impl geng::State for Game {
             None,
             None,
         );
+        for baby in self.other_babies.values() {
+            self.draw_baby(framebuffer, baby);
+        }
         self.draw_baby(framebuffer, &self.baby);
     }
     fn update(&mut self, delta_time: f64) {
+        self.handler_multiplayer();
         let delta_time = delta_time as f32;
         self.time += delta_time;
         let cursor_window_pos = self.geng.window().cursor_position().unwrap_or(vec2::ZERO);
@@ -366,7 +406,8 @@ fn main() {
                 .load(run_dir().join("assets"))
                 .await
                 .expect("failed to load assets");
-            geng.run_state(Game::new(&geng, &assets, connection)).await
+            geng.run_state(Game::new(&geng, &assets, connection).await)
+                .await
         });
 
         #[cfg(not(target_arch = "wasm32"))]

@@ -4,10 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ctrlc = "3.4.5"
 evenio = "0.6"
 geng.git = "https://github.com/geng-engine/geng"
 serde = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = "0.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ctrlc = "3.4.5"
 
 [patch.crates-io]
 async-broadcast = { git = "https://github.com/kuviman/async-broadcast", branch = "fix-wasm-again" }
