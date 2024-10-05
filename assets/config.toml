@@ -1,6 +1,14 @@
 background_color = "#777"
 sensitivity = 0.1
 
+[info]
+tiny_scale = 0.2
+timer_size = 2
+timer_color = "black"
+join_offset = [0, -2]
+join_color = "black"
+join_size = 1
+
 [camera]
 fov = 20
 speed = 10

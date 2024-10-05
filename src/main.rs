@@ -46,9 +46,20 @@ struct CameraConfig {
     speed: f32,
 }
 
+#[derive(Deserialize)]
+struct InfoConfig {
+    tiny_scale: f32,
+    timer_size: f32,
+    timer_color: Rgba<f32>,
+    join_offset: vec2<f32>,
+    join_size: f32,
+    join_color: Rgba<f32>,
+}
+
 #[derive(geng::asset::Load, Deserialize)]
 #[load(serde = "toml")]
 struct Config {
+    info: InfoConfig,
     background_color: Rgba<f32>,
     camera: CameraConfig,
     sensitivity: f32,
@@ -133,12 +144,12 @@ struct Baby {
 }
 
 impl Baby {
-    fn new(assets: &Assets, pos: vec2<f32>) -> Self {
+    fn new(assets: Option<&Assets>, pos: vec2<f32>) -> Self {
         Self {
             pos,
             rotation: Angle::ZERO,
             head_rotation: Angle::ZERO,
-            radius: assets.config.baby.radius,
+            radius: assets.map_or(1.0, |assets| assets.config.baby.radius),
             limbs: {
                 let mut map = HashMap::new();
                 for limb in Limb::all() {
@@ -146,7 +157,9 @@ impl Baby {
                         limb,
                         LimbState {
                             rotation: Angle::ZERO,
-                            angle: Angle::from_degrees(assets.config.baby.limbs[&limb].angle),
+                            angle: Angle::from_degrees(
+                                assets.map_or(0.0, |assets| assets.config.baby.limbs[&limb].angle),
+                            ),
                         },
                     );
                 }
@@ -158,9 +171,12 @@ impl Baby {
 
 struct Game {
     my_id: ClientId,
+    until_next_race: f32,
+    joining_next_race: usize,
+    join_next: bool,
     geng: Geng,
     assets: Rc<Assets>,
-    baby: Baby,
+    baby: Option<Baby>,
     other_babies: HashMap<ClientId, Baby>,
     camera: Camera2d,
     time: f32,
@@ -177,20 +193,15 @@ impl Game {
         let ServerMessage::Auth { id: my_id } = connection.next().await.unwrap().unwrap() else {
             unreachable!()
         };
-        let ServerMessage::Spawn(spawn_pos) = connection
-            .next()
-            .await
-            .expect("server connection failure")
-            .unwrap()
-        else {
-            unreachable!()
-        };
         Self {
+            until_next_race: 0.0,
+            joining_next_race: 0,
             my_id,
+            join_next: false,
             connection,
             geng: geng.clone(),
             assets: assets.clone(),
-            baby: Baby::new(assets, spawn_pos),
+            baby: None,
             other_babies: HashMap::new(),
             camera: Camera2d {
                 center: vec2::ZERO,
@@ -243,7 +254,7 @@ impl Game {
     }
 
     fn baby_control(&mut self, cursor_pos: vec2<f32>) {
-        let baby = &mut self.baby;
+        let Some(baby) = &mut self.baby else { return };
         baby.head_rotation = (((cursor_pos - (baby.pos + self.assets.config.baby.head_offset))
             .arg()
             - baby.rotation
@@ -310,23 +321,92 @@ impl Game {
         for message in new_messages {
             let message = message.expect("server connection failure");
             match message {
-                ServerMessage::Spawn(pos) => self.baby = Baby::new(&self.assets, pos),
-                ServerMessage::StateSync { babies } => {
+                ServerMessage::Spawn(pos) => {
+                    self.baby = Some(Baby::new(Some(&self.assets), pos));
+                    self.join_next = false;
+                }
+                ServerMessage::StateSync {
+                    babies,
+                    until_next_race,
+                    joining_next_race,
+                } => {
+                    self.until_next_race = until_next_race;
+                    self.joining_next_race = joining_next_race;
                     self.other_babies = babies
                         .into_iter()
                         .filter(|&(id, _)| id != self.my_id)
                         .collect();
-                    self.connection.send(ClientMessage::StateSync {
+                    self.connection.send(ClientMessage::StateSync(ClientState {
                         baby: self.baby.clone(),
-                    })
+                        join_next: self.join_next,
+                    }))
                 }
                 ServerMessage::Auth { .. } => unreachable!(),
             }
         }
     }
+
+    fn show_info(&self, framebuffer: &mut ugli::Framebuffer) {
+        if self.baby.is_some() {
+            return;
+        }
+        let top_right_corner = self
+            .camera
+            .view_area(self.framebuffer_size)
+            .bounding_box()
+            .top_right();
+        let next_race_tiny = self.baby.is_some();
+        let info_tranform = if next_race_tiny {
+            mat3::scale_uniform_around(top_right_corner, self.assets.config.info.tiny_scale)
+        } else {
+            mat3::identity()
+        };
+        let font: &geng::Font = self.geng.default_font();
+        font.draw(
+            framebuffer,
+            &self.camera,
+            &format!("until next race: {} seconds", self.until_next_race as i32),
+            vec2::splat(geng::TextAlign::CENTER),
+            info_tranform
+                * mat3::translate(self.camera.center)
+                * mat3::scale_uniform(self.assets.config.info.timer_size),
+            self.assets.config.info.timer_color,
+        );
+        let text = if self.join_next {
+            "you have joined, just wait"
+        } else {
+            "press SPACE to join"
+        };
+        font.draw(
+            framebuffer,
+            &self.camera,
+            text,
+            vec2::splat(geng::TextAlign::CENTER),
+            info_tranform
+                * mat3::translate(self.camera.center + self.assets.config.info.join_offset)
+                * mat3::scale_uniform(self.assets.config.info.join_size),
+            self.assets.config.info.join_color,
+        );
+    }
 }
 
 impl geng::State for Game {
+    fn handle_event(&mut self, event: geng::Event) {
+        if let geng::Event::KeyPress { key } = event {
+            match key {
+                geng::Key::Space => {
+                    if self.baby.is_none() {
+                        self.join_next = true;
+                    }
+                }
+                geng::Key::R => {
+                    self.baby = None;
+                    self.connection.send(ClientMessage::Despawn);
+                }
+                _ => {}
+            }
+        }
+    }
     fn draw(&mut self, framebuffer: &mut ugli::Framebuffer) {
         self.framebuffer_size = framebuffer.size().map(|x| x as f32);
         ugli::clear(
@@ -338,7 +418,10 @@ impl geng::State for Game {
         for baby in self.other_babies.values() {
             self.draw_baby(framebuffer, baby);
         }
-        self.draw_baby(framebuffer, &self.baby);
+        if let Some(baby) = &self.baby {
+            self.draw_baby(framebuffer, baby);
+        }
+        self.show_info(framebuffer);
     }
     fn update(&mut self, delta_time: f64) {
         self.handler_multiplayer();
@@ -349,8 +432,10 @@ impl geng::State for Game {
             .camera
             .screen_to_world(self.framebuffer_size, cursor_window_pos.map(|x| x as f32));
         self.baby_control(cursor_pos);
-        self.camera.center += (self.baby.pos - self.camera.center)
-            * (delta_time * self.assets.config.camera.speed).min(1.0);
+        if let Some(baby) = &self.baby {
+            self.camera.center += (baby.pos - self.camera.center)
+                * (delta_time * self.assets.config.camera.speed).min(1.0);
+        }
 
         self.prev_cursor_pos = cursor_pos;
     }
