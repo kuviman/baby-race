@@ -5,9 +5,15 @@ struct Config {
     race_timer: f64,
 }
 
+struct RaceState {
+    finished: usize,
+}
+
 struct State {
     config: Config,
+    next_race_id: RaceId,
     next_client_id: ClientId,
+    races: HashMap<RaceId, RaceState>,
     clients: BTreeMap<ClientId, ClientServerState>,
 }
 
@@ -40,6 +46,8 @@ impl App {
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(State {
+                next_race_id: 0,
+                races: default(),
                 config: futures::executor::block_on(file::load_detect(
                     run_dir().join("assets").join("server.toml"),
                 ))
@@ -67,6 +75,18 @@ impl Drop for Client {
 impl geng::net::Receiver<ClientMessage> for Client {
     fn handle(&mut self, message: ClientMessage) {
         match message {
+            ClientMessage::Finish => {
+                let mut state = self.state.lock().unwrap();
+                let client = state.clients.get_mut(&self.id).unwrap();
+                client.baby = None;
+                if let Some(race_id) = client.race_id {
+                    let race = state.races.get_mut(&race_id).unwrap();
+                    race.finished += 1;
+                    self.sender.send(ServerMessage::RaceResult {
+                        rank: race.finished,
+                    });
+                }
+            }
             ClientMessage::StartRace => {
                 let mut state = self.state.lock().unwrap();
                 if state.clients[&self.id].baby.is_some() {
@@ -83,11 +103,15 @@ impl geng::net::Receiver<ClientMessage> for Client {
                         }
                     })
                     .collect();
+                let race_id = state.next_race_id;
+                state.next_race_id += 1;
+                state.races.insert(race_id, RaceState { finished: 0 });
                 for id in participants {
                     let baby = Baby::new(None, state.find_new_spawn_pos());
                     let client = state.clients.get_mut(&id).unwrap();
                     client.hosting_race = false;
-                    client.joined = Some(id);
+                    client.joined = None;
+                    client.race_id = Some(race_id);
                     client.baby = Some(baby);
                 }
             }
@@ -140,6 +164,7 @@ impl geng::net::server::App for App {
                 baby: None,
                 hosting_race: false,
                 joined: None,
+                race_id: None,
             },
         );
         sender.send(ServerMessage::Auth { id });

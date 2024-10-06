@@ -55,6 +55,9 @@ struct UiConfig {
     button_color: Rgba<f32>,
     hover_color: Rgba<f32>,
     text_offset: f32,
+    rank_color: Rgba<f32>,
+    rank_offset: f32,
+    rank_size: f32,
 }
 
 #[derive(geng::asset::Load, Deserialize)]
@@ -175,6 +178,7 @@ impl Baby {
 }
 
 struct Game {
+    rank: Option<usize>,
     my_id: ClientId,
     geng: Geng,
     assets: Rc<Assets>,
@@ -200,6 +204,7 @@ impl Game {
             unreachable!()
         };
         Self {
+            rank: None,
             ui_camera: Camera2d {
                 center: vec2::ZERO,
                 rotation: Angle::ZERO,
@@ -266,6 +271,14 @@ impl Game {
 
     fn baby_control(&mut self, cursor_pos: vec2<f32>) {
         let Some(baby) = &mut self.baby else { return };
+        if baby.pos.y < 0.0 {
+            baby.pos.y = 0.0;
+        }
+        if baby.pos.y > self.assets.config.track_len {
+            self.baby = None;
+            self.connection.send(ClientMessage::Finish);
+            return;
+        }
         baby.head_rotation = (((cursor_pos - (baby.pos + self.assets.config.baby.head_offset))
             .arg()
             - baby.rotation
@@ -332,6 +345,9 @@ impl Game {
         for message in new_messages {
             let message = message.expect("server connection failure");
             match message {
+                ServerMessage::RaceResult { rank } => {
+                    self.rank = Some(rank);
+                }
                 ServerMessage::Spawn(pos) => {
                     self.baby = Some(Baby::new(Some(&self.assets), pos));
                     self.host_race = false;
@@ -521,6 +537,18 @@ impl Game {
                 .map(|x| x as f32),
         );
         let font: &geng::Font = self.geng.default_font();
+
+        if let Some(rank) = self.rank {
+            font.draw(
+                framebuffer,
+                &self.ui_camera,
+                &format!("You placed #{rank}"),
+                vec2(geng::TextAlign::CENTER, geng::TextAlign::BOTTOM),
+                mat3::translate(vec2(0.0, self.assets.config.ui.rank_offset))
+                    * mat3::scale_uniform(self.assets.config.ui.rank_size),
+                self.assets.config.ui.rank_color,
+            );
+        }
 
         let mut y = 0.0;
         for item in self.menu() {
