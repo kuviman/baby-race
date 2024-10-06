@@ -77,6 +77,7 @@ struct UiConfig {
 #[derive(geng::asset::Load, Deserialize)]
 #[load(serde = "toml")]
 struct Config {
+    tutorial_size: f32,
     nametag_offset: f32,
     nametag_color: Rgba<f32>,
     nametag_size: f32,
@@ -132,6 +133,7 @@ struct Assets {
     baby: BabyAssets,
     #[load(options(filter = "ugli::Filter::Nearest", wrap_mode = "ugli::WrapMode::Repeat"))]
     ruler: ugli::Texture,
+    tutorial: Texture,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -837,6 +839,20 @@ impl geng::State for Game {
         }
         if let Some(baby) = &self.baby {
             self.draw_baby(framebuffer, baby, true);
+            if baby.pos.y < 1.0 {
+                self.geng.draw2d().draw2d(
+                    framebuffer,
+                    &self.camera,
+                    &draw2d::TexturedQuad::unit(&self.assets.tutorial).transform(
+                        mat3::translate(baby.pos + vec2(0.0, self.assets.config.nametag_offset))
+                            * mat3::scale(
+                                self.assets.tutorial.size().map(|x| x as f32)
+                                    * self.assets.config.tutorial_size,
+                            )
+                            * mat3::scale_uniform_around(vec2(0.0, 1.0), 0.5),
+                    ),
+                );
+            }
             if let Some(pos) = self.locked_ground_pos {
                 self.geng.draw2d().circle(
                     framebuffer,
