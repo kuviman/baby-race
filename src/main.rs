@@ -895,10 +895,18 @@ impl geng::State for Game {
             .camera
             .screen_to_world(self.framebuffer_size, cursor_window_pos.map(|x| x as f32));
         self.baby_control(cursor_pos);
-        if let Some(baby) = &mut self.baby {
-            self.camera.center += (baby.pos - self.camera.center)
-                * (delta_time * self.assets.config.camera.speed).min(1.0);
-        }
+        let target_pos = if let Some(baby) = &mut self.baby {
+            baby.pos
+        } else {
+            self.others
+                .values()
+                .filter_map(|other| other.baby.as_ref())
+                .map(|baby| baby.pos)
+                .max_by_key(|pos| r32(pos.y))
+                .unwrap_or(vec2::ZERO)
+        };
+        self.camera.center += (target_pos - self.camera.center)
+            * (delta_time * self.assets.config.camera.speed).min(1.0);
 
         self.prev_cursor_pos = cursor_pos;
     }
