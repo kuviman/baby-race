@@ -691,18 +691,20 @@ impl Game {
         let font: &geng::Font = self.geng.default_font();
 
         if let Some(rank) = self.rank {
-            let seconds = self.finish_time as i32;
-            let minutes = seconds / 60;
-            let seconds = seconds % 60;
-            font.draw(
-                framebuffer,
-                &self.ui_camera,
-                &format!("You placed #{rank} (time = {minutes}:{seconds:02})"),
-                vec2(geng::TextAlign::CENTER, geng::TextAlign::BOTTOM),
-                mat3::translate(vec2(0.0, self.assets.config.ui.rank_offset))
-                    * mat3::scale_uniform(self.assets.config.ui.rank_size),
-                self.assets.config.ui.rank_color,
-            );
+            if !self.spectating {
+                let seconds = self.finish_time as i32;
+                let minutes = seconds / 60;
+                let seconds = seconds % 60;
+                font.draw(
+                    framebuffer,
+                    &self.ui_camera,
+                    &format!("You placed #{rank} (time = {minutes}:{seconds:02})"),
+                    vec2(geng::TextAlign::CENTER, geng::TextAlign::BOTTOM),
+                    mat3::translate(vec2(0.0, self.assets.config.ui.rank_offset))
+                        * mat3::scale_uniform(self.assets.config.ui.rank_size),
+                    self.assets.config.ui.rank_color,
+                );
+            }
         }
 
         for (y, item) in self.menu() {
