@@ -1,8 +1,15 @@
 background_color = "#778C53"
-# background_color = "#C9A079"
 sensitivity = 0.1
 ruler_color = "white"
 track_len = 20
+
+[outline]
+scale = 1.1
+color = "black"
+hovered_color = "green"
+air_color = "#77f"
+ground_highlight_radius = 0.1
+ground_color = "#0004"
 
 [ui]
 fov = 20
@@ -25,25 +32,29 @@ max_head_rotation = 40
 head_rotation_k = 0.3
 arm_offset = [-0.5, 0.5]
 leg_offset = [-0.4, -0.8]
-limb_rotation_limit = 30
+limb_rotation_limit = 50
 limb_length = 0.5
 [baby.limbs.RightArm]
 angle = 45
 body_pos = [0.5, 0.5]
-touch_ground = [0.5, 0.5]
+texture_origin = [0, 0]
+touch_ground = [0.7, 0.9]
 flip = true
 [baby.limbs.LeftArm]
 angle = 135
 body_pos = [-0.5, 0.5]
-touch_ground = [-0.5, 0.5]
+texture_origin = [0, 0]
+touch_ground = [-0.7, 0.9]
 flip = false
 [baby.limbs.RightLeg]
 angle = -45
 body_pos = [0.4, -0.7]
-touch_ground = [0.5, -0.5]
+texture_origin = [0, 0]
+touch_ground = [0.7, -0.7]
 flip = true
 [baby.limbs.LeftLeg]
 angle = -135
 body_pos = [-0.4, -0.7]
-touch_ground = [-0.5, -0.5]
+texture_origin = [0, 0]
+touch_ground = [-0.7, -0.7]
 flip = false

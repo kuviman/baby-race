@@ -29,6 +29,7 @@ struct LimbConfig {
     touch_ground: vec2<f32>,
     /// wether to flip the texture
     flip: bool,
+    texture_origin: vec2<f32>,
 }
 
 #[derive(Deserialize)]
@@ -49,6 +50,16 @@ struct CameraConfig {
 }
 
 #[derive(Deserialize)]
+struct OutlineConfig {
+    scale: f32,
+    color: Rgba<f32>,
+    hovered_color: Rgba<f32>,
+    ground_color: Rgba<f32>,
+    ground_highlight_radius: f32,
+    air_color: Rgba<f32>,
+}
+
+#[derive(Deserialize)]
 struct UiConfig {
     fov: f32,
     label_color: Rgba<f32>,
@@ -63,6 +74,7 @@ struct UiConfig {
 #[derive(geng::asset::Load, Deserialize)]
 #[load(serde = "toml")]
 struct Config {
+    outline: OutlineConfig,
     ui: UiConfig,
     background_color: Rgba<f32>,
     camera: CameraConfig,
@@ -131,7 +143,7 @@ impl Limb {
             Limb::LeftLeg | Limb::RightLeg => true,
         }
     }
-    fn all() -> impl Iterator<Item = Self> {
+    fn all() -> impl Iterator<Item = Self> + Clone {
         [Self::LeftArm, Self::RightArm, Self::LeftLeg, Self::RightLeg].into_iter()
     }
 }
@@ -178,6 +190,8 @@ impl Baby {
 }
 
 struct Game {
+    dbg: Option<vec2<f32>>,
+    hovered_limb: Limb,
     locked_ground_pos: Option<vec2<f32>>,
     rank: Option<usize>,
     my_id: ClientId,
@@ -205,6 +219,7 @@ impl Game {
             unreachable!()
         };
         Self {
+            hovered_limb: Limb::LeftArm,
             locked_ground_pos: None,
             rank: None,
             ui_camera: Camera2d {
@@ -230,45 +245,74 @@ impl Game {
             framebuffer_size: vec2::splat(1.0),
             prev_cursor_pos: vec2::ZERO,
             locked_limb: None,
+            dbg: None,
         }
     }
 
-    fn draw_baby(&self, framebuffer: &mut ugli::Framebuffer, baby: &Baby) {
+    fn draw_baby(&self, framebuffer: &mut ugli::Framebuffer, baby: &Baby, me: bool) {
         let transform = mat3::translate(baby.pos)
             * mat3::rotate(baby.rotation)
             * mat3::scale_uniform(baby.radius);
-        for limb in Limb::all() {
-            let texture = match limb.is_leg() {
-                true => &self.assets.baby.leg,
-                false => &self.assets.baby.arm,
-            };
-            let config = &self.assets.config.baby.limbs[&limb];
-            let limb = &baby.limbs[&limb];
+        let parts = Limb::all()
+            .map(|limb| {
+                let texture = match limb.is_leg() {
+                    true => &self.assets.baby.leg,
+                    false => &self.assets.baby.arm,
+                };
+                let config = &self.assets.config.baby.limbs[&limb];
+                let limb_state = &baby.limbs[&limb];
+                (
+                    texture,
+                    transform
+                        * mat3::translate(config.body_pos)
+                        * mat3::rotate(limb_state.rotation)
+                        * mat3::translate(-config.texture_origin)
+                        * mat3::scale(vec2(if config.flip { -1.0 } else { 1.0 }, 1.0)),
+                    Some(limb),
+                )
+            })
+            .chain([
+                (&self.assets.baby.body, transform, None),
+                (
+                    &self.assets.baby.head,
+                    transform
+                        * mat3::translate(self.assets.config.baby.head_offset)
+                        * mat3::rotate(baby.head_rotation),
+                    None,
+                ),
+            ]);
+        if me {
+            for (texture, transform, limb) in parts.clone() {
+                let mut color = self.assets.config.outline.color;
+                if let Some(limb) = limb {
+                    if self.hovered_limb == limb {
+                        color = self.assets.config.outline.hovered_color;
+                    }
+                    if self.locked_limb == Some(limb)
+                        && self
+                            .geng
+                            .window()
+                            .is_button_pressed(geng::MouseButton::Right)
+                    {
+                        color = self.assets.config.outline.air_color;
+                    }
+                }
+                self.geng.draw2d().draw2d(
+                    framebuffer,
+                    &self.camera,
+                    &draw2d::TexturedQuad::unit_colored(texture, color).transform(
+                        transform * mat3::scale_uniform(self.assets.config.outline.scale),
+                    ),
+                );
+            }
+        }
+        for (texture, transform, _limb) in parts {
             self.geng.draw2d().draw2d(
                 framebuffer,
                 &self.camera,
-                &draw2d::TexturedQuad::unit(texture).transform(
-                    transform
-                        * mat3::translate(config.body_pos)
-                        * mat3::rotate(limb.rotation)
-                        * mat3::scale(vec2(if config.flip { -1.0 } else { 1.0 }, 1.0)),
-                ),
+                &draw2d::TexturedQuad::unit(texture).transform(transform),
             );
         }
-        self.geng.draw2d().draw2d(
-            framebuffer,
-            &self.camera,
-            &draw2d::TexturedQuad::unit(&self.assets.baby.body).transform(transform),
-        );
-        self.geng.draw2d().draw2d(
-            framebuffer,
-            &self.camera,
-            &draw2d::TexturedQuad::unit(&self.assets.baby.head).transform(
-                transform
-                    * mat3::translate(self.assets.config.baby.head_offset)
-                    * mat3::rotate(baby.head_rotation),
-            ),
-        );
     }
 
     fn baby_control(&mut self, cursor_pos: vec2<f32>) {
@@ -306,46 +350,56 @@ impl Game {
             .geng
             .window()
             .is_button_pressed(geng::MouseButton::Left);
+        let angle = (cursor_pos - baby.pos).arg();
+        let hovered = Limb::all()
+            .min_by_key(|limb| {
+                (angle - baby.rotation - baby.limbs[limb].angle)
+                    .normalized_pi()
+                    .abs()
+                    .map(r32)
+            })
+            .unwrap();
         if air_control || ground_control {
-            let angle = (cursor_pos - baby.pos).arg();
             let limb = match self.locked_limb {
                 Some(limb) => limb,
-                None => Limb::all()
-                    .min_by_key(|limb| {
-                        (angle - baby.rotation - baby.limbs[limb].angle)
-                            .normalized_pi()
-                            .abs()
-                            .map(r32)
-                    })
-                    .unwrap(),
+                None => hovered,
             };
+            self.hovered_limb = limb;
             self.locked_limb = Some(limb);
             let limb_config = &self.assets.config.baby.limbs[&limb];
             let limb = &mut baby.limbs.get_mut(&limb).unwrap();
 
-            let old_body_pos = baby.pos + limb_config.body_pos.rotate(baby.rotation);
+            let old_body_pos = baby.pos + limb_config.body_pos.rotate(baby.rotation) * baby.radius;
             let ground_pos = self.locked_ground_pos.unwrap_or_else(|| {
                 old_body_pos
                     + limb_config
                         .touch_ground
                         .rotate(limb.rotation + baby.rotation)
+                        * baby.radius
             });
+            // self.dbg = Some(old_body_pos);
             if ground_control {
                 self.locked_ground_pos = Some(ground_pos);
             } else {
                 self.locked_ground_pos = None;
             }
+            // nothing looks correct here
             let new_body_pos = ground_pos
-                + (old_body_pos - ground_pos - delta).normalize() * limb_config.touch_ground.len();
-            limb.rotation =
-                ((ground_pos - new_body_pos).arg() - limb.angle - baby.rotation).normalized_pi();
+                + (old_body_pos - ground_pos - delta).normalize()
+                    * limb_config.touch_ground.len()
+                    * baby.radius;
+            limb.rotation = ((ground_pos - new_body_pos).arg()
+                - limb_config.touch_ground.arg()
+                - baby.rotation)
+                .normalized_pi();
             limb.rotation = limb.rotation.clamp_abs(Angle::from_degrees(
                 self.assets.config.baby.limb_rotation_limit,
             ));
             let new_body_pos = ground_pos
                 - limb_config
                     .touch_ground
-                    .rotate(limb.rotation + baby.rotation);
+                    .rotate(limb.rotation + baby.rotation)
+                    * baby.radius;
             if ground_control {
                 let rotation = (new_body_pos - baby.pos).arg() - (old_body_pos - baby.pos).arg();
                 baby.rotation += rotation;
@@ -355,6 +409,7 @@ impl Game {
         } else {
             self.locked_limb = None;
             self.locked_ground_pos = None;
+            self.hovered_limb = hovered;
         }
     }
     fn handler_multiplayer(&mut self) {
@@ -642,10 +697,28 @@ impl geng::State for Game {
             ugli::DrawMode::TriangleFan,
         );
         for baby in self.other_babies.values() {
-            self.draw_baby(framebuffer, baby);
+            self.draw_baby(framebuffer, baby, false);
         }
         if let Some(baby) = &self.baby {
-            self.draw_baby(framebuffer, baby);
+            self.draw_baby(framebuffer, baby, true);
+            if let Some(pos) = self.locked_ground_pos {
+                self.geng.draw2d().circle(
+                    framebuffer,
+                    &self.camera,
+                    pos,
+                    self.assets.config.outline.ground_highlight_radius,
+                    self.assets.config.outline.ground_color,
+                );
+            }
+        }
+        if let Some(pos) = self.dbg {
+            self.geng.draw2d().circle(
+                framebuffer,
+                &self.camera,
+                pos,
+                self.assets.config.outline.ground_highlight_radius,
+                self.assets.config.outline.ground_color,
+            );
         }
         self.draw_menu(framebuffer);
     }
