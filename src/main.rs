@@ -77,6 +77,7 @@ struct UiConfig {
 #[derive(geng::asset::Load, Deserialize)]
 #[load(serde = "toml")]
 struct Config {
+    parents_height: f32,
     tutorial_size: f32,
     nametag_offset: f32,
     nametag_color: Rgba<f32>,
@@ -129,6 +130,8 @@ struct BabyAssets {
 
 #[derive(geng::asset::Load)]
 struct Assets {
+    #[load(options(filter = "ugli::Filter::Nearest", wrap_mode = "ugli::WrapMode::Repeat"))]
+    parents: ugli::Texture,
     config: Config,
     baby: BabyAssets,
     #[load(options(filter = "ugli::Filter::Nearest", wrap_mode = "ugli::WrapMode::Repeat"))]
@@ -337,10 +340,10 @@ impl Game {
             self.locked_ground_pos = None;
             return;
         };
-        if baby.pos.y < 0.0 {
-            baby.pos.y = 0.0;
+        if baby.pos.y < 1.0 {
+            baby.pos.y = 1.0;
         }
-        if baby.pos.y > self.assets.config.track_len {
+        if baby.pos.y > self.assets.config.track_len - 1.0 {
             self.baby = None;
             self.connection.send(ClientMessage::Finish);
             return;
@@ -803,25 +806,51 @@ impl geng::State for Game {
             None,
             None,
         );
-        self.geng.draw2d().draw_textured(
+        let stretched = |framebuffer: &mut ugli::Framebuffer,
+                         texture: &ugli::Texture,
+                         at: f32,
+                         height: f32,
+                         color: Rgba<f32>| {
+            self.geng.draw2d().draw_textured(
+                framebuffer,
+                &self.camera,
+                &[(-1, 0), (1, 0), (1, 1), (-1, 1)].map(|(x, y)| {
+                    let world_x =
+                        self.camera.center.x + x as f32 * self.assets.config.camera.fov * 2.0;
+                    draw2d::TexturedVertex {
+                        a_pos: vec2(world_x, at + y as f32 * height),
+                        a_color: Rgba::WHITE,
+                        a_vt: vec2(
+                            world_x / height / texture.size().map(|x| x as f32).aspect(),
+                            y as f32,
+                        ),
+                    }
+                }),
+                texture,
+                color,
+                ugli::DrawMode::TriangleFan,
+            );
+        };
+        stretched(
             framebuffer,
-            &self.camera,
-            &[(-1, 0), (1, 0), (1, 1), (-1, 1)].map(|(x, y)| {
-                let world_x = self.camera.center.x + x as f32 * self.assets.config.camera.fov * 2.0;
-                draw2d::TexturedVertex {
-                    a_pos: vec2(world_x, y as f32 * self.assets.config.track_len),
-                    a_color: Rgba::WHITE,
-                    a_vt: vec2(
-                        world_x
-                            / self.assets.config.track_len
-                            / self.assets.ruler.size().map(|x| x as f32).aspect(),
-                        y as f32,
-                    ),
-                }
-            }),
             &self.assets.ruler,
+            0.0,
+            self.assets.config.track_len,
             self.assets.config.ruler_color,
-            ugli::DrawMode::TriangleFan,
+        );
+        stretched(
+            framebuffer,
+            &self.assets.parents,
+            -self.assets.config.parents_height,
+            self.assets.config.parents_height,
+            Rgba::WHITE,
+        );
+        stretched(
+            framebuffer,
+            &self.assets.parents,
+            self.assets.config.track_len,
+            self.assets.config.parents_height,
+            Rgba::WHITE,
         );
         for other in self.others.values() {
             if let Some(baby) = &other.baby {
@@ -839,7 +868,7 @@ impl geng::State for Game {
         }
         if let Some(baby) = &self.baby {
             self.draw_baby(framebuffer, baby, true);
-            if baby.pos.y < 1.0 {
+            if baby.pos.y < 2.0 {
                 self.geng.draw2d().draw2d(
                     framebuffer,
                     &self.camera,

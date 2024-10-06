@@ -4,6 +4,7 @@ use super::*;
 struct Config {
     race_timer: f64,
     spawn_gap: f32,
+    start_y: f32,
 }
 
 struct RaceState {
@@ -31,7 +32,7 @@ impl State {
             .flat_map(|abs| [-abs, abs])
             .find(|x| !used_x.contains(x))
             .unwrap();
-        vec2(unused_x as f32 * self.config.spawn_gap, 0.0)
+        vec2(unused_x as f32 * self.config.spawn_gap, self.config.start_y)
     }
     fn sync_message(&self) -> ServerMessage {
         ServerMessage::StateSync {

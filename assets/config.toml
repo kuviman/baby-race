@@ -1,4 +1,5 @@
 background_color = "#778C53"
+parents_height = 3
 tutorial_size = 0.03
 sensitivity = 0.1
 ruler_color = "white"
