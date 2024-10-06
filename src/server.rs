@@ -3,6 +3,7 @@ use super::*;
 #[derive(Deserialize)]
 struct Config {
     race_timer: f64,
+    spawn_gap: f32,
 }
 
 struct RaceState {
@@ -22,14 +23,14 @@ impl State {
         let mut used_x = HashSet::new();
         for client in self.clients.values() {
             if let Some(baby) = &client.baby {
-                used_x.insert(baby.pos.x.round() as i32);
+                used_x.insert((baby.pos.x / self.config.spawn_gap).round() as i32);
             }
         }
         let unused_x = (0..)
             .flat_map(|abs| [-abs, abs])
             .find(|x| !used_x.contains(x))
             .unwrap();
-        vec2(unused_x as f32, 0.0)
+        vec2(unused_x as f32 * self.config.spawn_gap, 0.0)
     }
     fn sync_message(&self) -> ServerMessage {
         ServerMessage::StateSync {
