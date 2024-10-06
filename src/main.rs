@@ -392,9 +392,8 @@ impl Game {
                 - limb_config.touch_ground.arg()
                 - baby.rotation)
                 .normalized_pi();
-            limb.rotation = limb.rotation.clamp_abs(Angle::from_degrees(
-                self.assets.config.baby.limb_rotation_limit,
-            ));
+            let rotation_limit = Angle::from_degrees(self.assets.config.baby.limb_rotation_limit);
+            limb.rotation = limb.rotation.clamp_abs(rotation_limit);
             let new_body_pos = ground_pos
                 - limb_config
                     .touch_ground
@@ -402,8 +401,30 @@ impl Game {
                     * baby.radius;
             if ground_control {
                 let rotation = (new_body_pos - baby.pos).arg() - (old_body_pos - baby.pos).arg();
+                let old_rotation = baby.rotation;
+                let old_pos = baby.pos;
                 baby.rotation += rotation;
                 baby.pos += new_body_pos - (baby.pos + (old_body_pos - baby.pos).rotate(rotation));
+
+                for limb in Limb::all() {
+                    let limb_config = &self.assets.config.baby.limbs[&limb];
+                    if Some(limb) == self.locked_limb {
+                        continue;
+                    }
+                    let limb = &mut baby.limbs.get_mut(&limb).unwrap();
+                    let old_body_pos =
+                        old_pos + limb_config.body_pos.rotate(old_rotation) * baby.radius;
+                    let old_ground_pos = old_body_pos
+                        + limb_config
+                            .touch_ground
+                            .rotate(limb.rotation + baby.rotation)
+                            * baby.radius;
+                    let new_body_pos =
+                        baby.pos + limb_config.body_pos.rotate(baby.rotation) * baby.radius;
+                    limb.rotation += (new_body_pos - old_ground_pos).arg()
+                        - (old_body_pos - old_ground_pos).arg();
+                    limb.rotation = limb.rotation.normalized_pi().clamp_abs(rotation_limit);
+                }
             }
             // limb.rotation = angle - limb.angle;
         } else {
