@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+use std::collections::BTreeMap;
+
 use geng::prelude::*;
 
 mod interop;
@@ -47,19 +49,18 @@ struct CameraConfig {
 }
 
 #[derive(Deserialize)]
-struct InfoConfig {
-    tiny_scale: f32,
-    timer_size: f32,
-    timer_color: Rgba<f32>,
-    join_offset: vec2<f32>,
-    join_size: f32,
-    join_color: Rgba<f32>,
+struct UiConfig {
+    fov: f32,
+    label_color: Rgba<f32>,
+    button_color: Rgba<f32>,
+    hover_color: Rgba<f32>,
+    text_offset: f32,
 }
 
 #[derive(geng::asset::Load, Deserialize)]
 #[load(serde = "toml")]
 struct Config {
-    info: InfoConfig,
+    ui: UiConfig,
     background_color: Rgba<f32>,
     camera: CameraConfig,
     sensitivity: f32,
@@ -171,14 +172,15 @@ impl Baby {
 
 struct Game {
     my_id: ClientId,
-    until_next_race: f32,
-    joining_next_race: usize,
-    join_next: bool,
     geng: Geng,
     assets: Rc<Assets>,
     baby: Option<Baby>,
-    other_babies: HashMap<ClientId, Baby>,
+    host_race: bool,
+    join_race: Option<ClientId>,
+    other_babies: BTreeMap<ClientId, Baby>,
+    others: BTreeMap<ClientId, ClientServerState>,
     camera: Camera2d,
+    ui_camera: Camera2d,
     time: f32,
     framebuffer_size: vec2<f32>,
     prev_cursor_pos: vec2<f32>,
@@ -194,15 +196,20 @@ impl Game {
             unreachable!()
         };
         Self {
-            until_next_race: 0.0,
-            joining_next_race: 0,
+            ui_camera: Camera2d {
+                center: vec2::ZERO,
+                rotation: Angle::ZERO,
+                fov: Camera2dFov::MinSide(assets.config.ui.fov),
+            },
             my_id,
-            join_next: false,
+            others: default(),
+            join_race: None,
+            host_race: false,
             connection,
             geng: geng.clone(),
             assets: assets.clone(),
             baby: None,
-            other_babies: HashMap::new(),
+            other_babies: default(),
             camera: Camera2d {
                 center: vec2::ZERO,
                 rotation: Angle::ZERO,
@@ -323,88 +330,238 @@ impl Game {
             match message {
                 ServerMessage::Spawn(pos) => {
                     self.baby = Some(Baby::new(Some(&self.assets), pos));
-                    self.join_next = false;
+                    self.host_race = false;
                 }
-                ServerMessage::StateSync {
-                    babies,
-                    until_next_race,
-                    joining_next_race,
-                } => {
-                    self.until_next_race = until_next_race;
-                    self.joining_next_race = joining_next_race;
-                    self.other_babies = babies
-                        .into_iter()
-                        .filter(|&(id, _)| id != self.my_id)
+                ServerMessage::StateSync { clients } => {
+                    self.other_babies = clients
+                        .iter()
+                        .filter_map(|(&id, client)| {
+                            if id == self.my_id {
+                                return None;
+                            }
+                            let baby = client.baby.clone()?;
+                            Some((id, baby))
+                        })
                         .collect();
+                    self.others = clients;
                     self.connection.send(ClientMessage::StateSync(ClientState {
                         baby: self.baby.clone(),
-                        join_next: self.join_next,
-                    }))
+                        host_race: self.host_race,
+                        join_race: self.join_race,
+                    }));
                 }
                 ServerMessage::Auth { .. } => unreachable!(),
             }
         }
     }
+}
 
-    fn show_info(&self, framebuffer: &mut ugli::Framebuffer) {
+enum MenuItemAction {
+    StartRace,
+    Host,
+    Cancel,
+    Join(ClientId),
+}
+
+struct MenuItem {
+    text: String,
+    action: Option<MenuItemAction>,
+}
+
+impl Game {
+    fn menu(&self) -> Vec<MenuItem> {
+        if self.host_race {
+            let mut result = vec![
+                MenuItem {
+                    text: "Start!".to_owned(),
+                    action: Some(MenuItemAction::StartRace),
+                },
+                MenuItem {
+                    text: "cancel".to_owned(),
+                    action: Some(MenuItemAction::Cancel),
+                },
+                MenuItem {
+                    text: "joined people:".to_owned(),
+                    action: None,
+                },
+                MenuItem {
+                    text: "YOU".to_owned(),
+                    action: None,
+                },
+            ];
+            for (&id, client) in &self.others {
+                if id == self.my_id {
+                    continue;
+                }
+                if client.joined == Some(self.my_id) {
+                    result.push(MenuItem {
+                        text: format!("player #{id}"),
+                        action: None,
+                    });
+                }
+            }
+            result
+        } else if let Some(joined) = self.join_race {
+            let mut result = vec![
+                MenuItem {
+                    text: "wait for the race to start".to_owned(),
+                    action: None,
+                },
+                MenuItem {
+                    text: "leave".to_owned(),
+                    action: Some(MenuItemAction::Cancel),
+                },
+                MenuItem {
+                    text: "joined people:".to_owned(),
+                    action: None,
+                },
+                MenuItem {
+                    text: "YOU".to_owned(),
+                    action: None,
+                },
+            ];
+            for (&id, client) in &self.others {
+                if id == self.my_id {
+                    continue;
+                }
+                if client.joined == Some(joined) || id == joined {
+                    result.push(MenuItem {
+                        text: format!("player #{id}"),
+                        action: None,
+                    });
+                }
+            }
+            result
+        } else {
+            let mut result = vec![
+                MenuItem {
+                    text: "Start SOLO!".to_owned(),
+                    action: Some(MenuItemAction::StartRace),
+                },
+                MenuItem {
+                    text: "Host a race".to_owned(),
+                    action: Some(MenuItemAction::Host),
+                },
+                MenuItem {
+                    text: "join race:".to_owned(),
+                    action: None,
+                },
+            ];
+            for (&id, client) in &self.others {
+                if id == self.my_id {
+                    continue;
+                }
+                if client.hosting_race {
+                    result.push(MenuItem {
+                        text: format!("player #{id}"),
+                        action: Some(MenuItemAction::Join(id)),
+                    });
+                }
+            }
+            result
+        }
+    }
+
+    fn click_menu(&mut self) {
         if self.baby.is_some() {
             return;
         }
-        let top_right_corner = self
-            .camera
+        let cursor = self.ui_camera.screen_to_world(
+            self.framebuffer_size,
+            self.geng
+                .window()
+                .cursor_position()
+                .unwrap_or(vec2::ZERO)
+                .map(|x| x as f32),
+        );
+        let mut y = 0.0;
+        for item in self.menu() {
+            let hovered = cursor.y > y && cursor.y < y + 1.0;
+            if hovered {
+                if let Some(action) = item.action {
+                    self.perform_menu_action(action);
+                    return;
+                }
+            }
+            y -= 1.0;
+        }
+    }
+
+    fn perform_menu_action(&mut self, action: MenuItemAction) {
+        match action {
+            MenuItemAction::StartRace => self.connection.send(ClientMessage::StartRace),
+            MenuItemAction::Host => self.host_race = true,
+            MenuItemAction::Cancel => {
+                self.host_race = false;
+                self.join_race = None;
+            }
+            MenuItemAction::Join(id) => self.join_race = Some(id),
+        }
+    }
+
+    fn draw_menu(&self, framebuffer: &mut ugli::Framebuffer) {
+        if self.baby.is_some() {
+            return;
+        }
+        let _top_right_corner = self
+            .ui_camera
             .view_area(self.framebuffer_size)
             .bounding_box()
             .top_right();
-        let next_race_tiny = self.baby.is_some();
-        let info_tranform = if next_race_tiny {
-            mat3::scale_uniform_around(top_right_corner, self.assets.config.info.tiny_scale)
-        } else {
-            mat3::identity()
-        };
+        let cursor = self.ui_camera.screen_to_world(
+            self.framebuffer_size,
+            self.geng
+                .window()
+                .cursor_position()
+                .unwrap_or(vec2::ZERO)
+                .map(|x| x as f32),
+        );
         let font: &geng::Font = self.geng.default_font();
-        font.draw(
-            framebuffer,
-            &self.camera,
-            &format!("until next race: {} seconds", self.until_next_race as i32),
-            vec2::splat(geng::TextAlign::CENTER),
-            info_tranform
-                * mat3::translate(self.camera.center)
-                * mat3::scale_uniform(self.assets.config.info.timer_size),
-            self.assets.config.info.timer_color,
-        );
-        let text = if self.join_next {
-            "you have joined, just wait"
-        } else {
-            "press SPACE to join"
-        };
-        font.draw(
-            framebuffer,
-            &self.camera,
-            text,
-            vec2::splat(geng::TextAlign::CENTER),
-            info_tranform
-                * mat3::translate(self.camera.center + self.assets.config.info.join_offset)
-                * mat3::scale_uniform(self.assets.config.info.join_size),
-            self.assets.config.info.join_color,
-        );
+
+        let mut y = 0.0;
+        for item in self.menu() {
+            let hovered = cursor.y > y && cursor.y < y + 1.0;
+            if hovered && item.action.is_some() {
+                self.geng.draw2d().quad(
+                    framebuffer,
+                    &self.ui_camera,
+                    Aabb2::point(vec2(0.0, y))
+                        .extend_up(1.0)
+                        .extend_symmetric(vec2(self.assets.config.ui.fov * 2.0, 0.0)),
+                    self.assets.config.ui.hover_color,
+                )
+            }
+            font.draw(
+                framebuffer,
+                &self.ui_camera,
+                &item.text,
+                vec2(geng::TextAlign::CENTER, geng::TextAlign::BOTTOM),
+                mat3::translate(vec2(0.0, y + self.assets.config.ui.text_offset)),
+                match item.action {
+                    None => self.assets.config.ui.label_color,
+                    Some(_) => self.assets.config.ui.button_color,
+                },
+            );
+            y -= 1.0;
+        }
     }
 }
 
 impl geng::State for Game {
     fn handle_event(&mut self, event: geng::Event) {
-        if let geng::Event::KeyPress { key } = event {
-            match key {
-                geng::Key::Space => {
-                    if self.baby.is_none() {
-                        self.join_next = true;
-                    }
-                }
-                geng::Key::R => {
+        match event {
+            geng::Event::KeyPress { key } => {
+                if key == geng::Key::R {
                     self.baby = None;
                     self.connection.send(ClientMessage::Despawn);
                 }
-                _ => {}
             }
+            geng::Event::MousePress {
+                button: geng::MouseButton::Left,
+            } => {
+                self.click_menu();
+            }
+            _ => (),
         }
     }
     fn draw(&mut self, framebuffer: &mut ugli::Framebuffer) {
@@ -421,9 +578,19 @@ impl geng::State for Game {
         if let Some(baby) = &self.baby {
             self.draw_baby(framebuffer, baby);
         }
-        self.show_info(framebuffer);
+        self.draw_menu(framebuffer);
     }
     fn update(&mut self, delta_time: f64) {
+        if let Some(joined) = self.join_race {
+            if self.baby.is_none()
+                && !self
+                    .others
+                    .get(&joined)
+                    .map_or(false, |host| host.hosting_race)
+            {
+                self.join_race = None;
+            }
+        }
         self.handler_multiplayer();
         let delta_time = delta_time as f32;
         self.time += delta_time;

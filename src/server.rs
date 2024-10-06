@@ -7,17 +7,17 @@ struct Config {
 
 struct State {
     config: Config,
-    next_race_timer: Timer,
     next_client_id: ClientId,
-    babies: HashMap<ClientId, Baby>,
-    next_race: HashMap<ClientId, bool>,
+    clients: BTreeMap<ClientId, ClientServerState>,
 }
 
 impl State {
     fn find_new_spawn_pos(&self) -> vec2<f32> {
         let mut used_x = HashSet::new();
-        for baby in self.babies.values() {
-            used_x.insert(baby.pos.x.round() as i32);
+        for client in self.clients.values() {
+            if let Some(baby) = &client.baby {
+                used_x.insert(baby.pos.x.round() as i32);
+            }
         }
         let unused_x = (0..)
             .flat_map(|abs| [-abs, abs])
@@ -25,24 +25,9 @@ impl State {
             .unwrap();
         vec2(unused_x as f32, 0.0)
     }
-    fn tick(&mut self) {
-        if self.next_race_timer.elapsed().as_secs_f64() > self.config.race_timer {
-            self.next_race_timer.reset();
-            for (id, join) in std::mem::take(&mut self.next_race) {
-                if !join {
-                    continue;
-                }
-                let baby = Baby::new(None, self.find_new_spawn_pos());
-                self.babies.insert(id, baby);
-            }
-        }
-    }
     fn sync_message(&self) -> ServerMessage {
         ServerMessage::StateSync {
-            babies: self.babies.clone(),
-            until_next_race: (self.config.race_timer - self.next_race_timer.elapsed().as_secs_f64())
-                .max(0.0) as f32,
-            joining_next_race: self.next_race.values().filter(|&&join| join).count(),
+            clients: self.clients.clone(),
         }
     }
 }
@@ -59,10 +44,8 @@ impl App {
                     run_dir().join("assets").join("server.toml"),
                 ))
                 .unwrap(),
-                next_race_timer: Timer::new(),
                 next_client_id: 0,
-                babies: HashMap::new(),
-                next_race: HashMap::new(),
+                clients: default(),
             })),
         }
     }
@@ -77,28 +60,63 @@ pub struct Client {
 impl Drop for Client {
     fn drop(&mut self) {
         let mut state = self.state.lock().unwrap();
-        state.babies.remove(&self.id);
-        state.next_race.remove(&self.id);
+        let _client = state.clients.remove(&self.id).unwrap();
     }
 }
 
 impl geng::net::Receiver<ClientMessage> for Client {
     fn handle(&mut self, message: ClientMessage) {
         match message {
-            ClientMessage::Despawn => {
-                self.state.lock().unwrap().babies.remove(&self.id);
-            }
-            ClientMessage::StateSync(client_state) => {
+            ClientMessage::StartRace => {
                 let mut state = self.state.lock().unwrap();
-                state.tick();
-                if let Some(client_baby) = state.babies.get_mut(&self.id) {
-                    if let Some(update) = client_state.baby {
-                        *client_baby = update;
-                    } else {
-                        self.sender.send(ServerMessage::Spawn(client_baby.pos));
-                    }
+                if state.clients[&self.id].baby.is_some() {
+                    return;
                 }
-                state.next_race.insert(self.id, client_state.join_next);
+                let participants: Vec<ClientId> = state
+                    .clients
+                    .iter()
+                    .filter_map(|(id, client)| {
+                        if client.joined == Some(self.id) || *id == self.id {
+                            Some(*id)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                for id in participants {
+                    let baby = Baby::new(None, state.find_new_spawn_pos());
+                    let client = state.clients.get_mut(&id).unwrap();
+                    client.hosting_race = false;
+                    client.joined = Some(id);
+                    client.baby = Some(baby);
+                }
+            }
+            ClientMessage::Despawn => {
+                let mut state = self.state.lock().unwrap();
+                let client = state.clients.get_mut(&self.id).unwrap();
+                client.baby = None;
+                client.joined = None;
+                client.hosting_race = false;
+            }
+            ClientMessage::StateSync(mut update) => {
+                let mut state = self.state.lock().unwrap();
+                if let Some(id) = update.join_race {
+                    if !state.clients.contains_key(&id) {
+                        update.join_race = None;
+                    }
+                    update.host_race = false;
+                }
+                let client = state.clients.get_mut(&self.id).unwrap();
+                if let Some(baby) = &mut client.baby {
+                    if let Some(update) = update.baby {
+                        *baby = update;
+                    } else {
+                        self.sender.send(ServerMessage::Spawn(baby.pos));
+                    }
+                } else {
+                    client.joined = update.join_race;
+                    client.hosting_race = update.host_race;
+                }
                 self.sender.send(state.sync_message());
             }
         }
@@ -116,6 +134,14 @@ impl geng::net::server::App for App {
         let mut state = self.state.lock().unwrap();
         let id = state.next_client_id;
         state.next_client_id += 1;
+        state.clients.insert(
+            id,
+            ClientServerState {
+                baby: None,
+                hosting_race: false,
+                joined: None,
+            },
+        );
         sender.send(ServerMessage::Auth { id });
         sender.send(state.sync_message());
         Client {

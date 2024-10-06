@@ -1,13 +1,12 @@
 background_color = "#777"
 sensitivity = 0.1
 
-[info]
-tiny_scale = 0.2
-timer_size = 2
-timer_color = "black"
-join_offset = [0, -2]
-join_color = "black"
-join_size = 1
+[ui]
+fov = 20
+label_color = "#444"
+button_color = "black"
+hover_color = "#fff7"
+text_offset = 0.2
 
 [camera]
 fov = 20
