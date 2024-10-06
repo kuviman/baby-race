@@ -323,7 +323,11 @@ impl Game {
                         .touch_ground
                         .rotate(limb.rotation + baby.rotation)
             });
-            self.locked_ground_pos = Some(ground_pos);
+            if ground_control {
+                self.locked_ground_pos = Some(ground_pos);
+            } else {
+                self.locked_ground_pos = None;
+            }
             let new_body_pos = ground_pos
                 + (old_body_pos - ground_pos - delta).normalize() * limb_config.touch_ground.len();
             limb.rotation =
