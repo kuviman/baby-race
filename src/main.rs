@@ -65,6 +65,8 @@ struct Config {
     camera: CameraConfig,
     sensitivity: f32,
     baby: BabyConfig,
+    ruler_color: Rgba<f32>,
+    track_len: f32,
 }
 
 #[derive(Deref)]
@@ -107,6 +109,8 @@ struct BabyAssets {
 struct Assets {
     config: Config,
     baby: BabyAssets,
+    #[load(options(filter = "ugli::Filter::Nearest", wrap_mode = "ugli::WrapMode::Repeat"))]
+    ruler: ugli::Texture,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -571,6 +575,26 @@ impl geng::State for Game {
             Some(self.assets.config.background_color),
             None,
             None,
+        );
+        self.geng.draw2d().draw_textured(
+            framebuffer,
+            &self.camera,
+            &[(-1, 0), (1, 0), (1, 1), (-1, 1)].map(|(x, y)| {
+                let world_x = self.camera.center.x + x as f32 * self.assets.config.camera.fov * 2.0;
+                draw2d::TexturedVertex {
+                    a_pos: vec2(world_x, y as f32 * self.assets.config.track_len),
+                    a_color: Rgba::WHITE,
+                    a_vt: vec2(
+                        world_x
+                            / self.assets.config.track_len
+                            / self.assets.ruler.size().map(|x| x as f32).aspect(),
+                        y as f32,
+                    ),
+                }
+            }),
+            &self.assets.ruler,
+            self.assets.config.ruler_color,
+            ugli::DrawMode::TriangleFan,
         );
         for baby in self.other_babies.values() {
             self.draw_baby(framebuffer, baby);
