@@ -61,6 +61,7 @@ struct OutlineConfig {
 
 #[derive(Deserialize)]
 struct UiConfig {
+    bg_color: Rgba<f32>,
     edit_text_color: Rgba<f32>,
     timer_color: Rgba<f32>,
     timer_size: f32,
@@ -203,6 +204,7 @@ impl Baby {
 }
 
 struct Game {
+    music: Option<geng::SoundEffect>,
     spectating: bool,
     edit_name: bool,
     name_updated: bool,
@@ -235,8 +237,9 @@ impl Game {
         let ServerMessage::Auth { id: my_id } = connection.next().await.unwrap().unwrap() else {
             unreachable!()
         };
-        assets.music.play();
+        let music = Some(assets.music.play());
         Self {
+            music,
             spectating: false,
             name_updated: true,
             edit_name: false,
@@ -505,6 +508,7 @@ enum MenuItemAction {
     Join(ClientId),
     EditName,
     ToggleSpectating,
+    ToggleMusic,
 }
 
 struct MenuItem {
@@ -518,6 +522,15 @@ impl Game {
             text: format!("your name: {}", self.name),
             action: Some(MenuItemAction::EditName),
         }];
+        items.push(MenuItem {
+            text: if self.music.is_some() {
+                "turn off music"
+            } else {
+                "turn on music"
+            }
+            .to_owned(),
+            action: Some(MenuItemAction::ToggleMusic),
+        });
         if self.host_race {
             items.extend([
                 MenuItem {
@@ -660,6 +673,16 @@ impl Game {
 
     fn perform_menu_action(&mut self, action: MenuItemAction) {
         match action {
+            MenuItemAction::ToggleMusic => {
+                if let Some(mut music) = self.music.take() {
+                    music.fade_out(time::Duration::from_secs_f64(1.0));
+                } else {
+                    let mut music = self.assets.music.effect(self.geng.audio().default_type());
+                    music.fade_in(time::Duration::from_secs_f64(1.0));
+                    music.play();
+                    self.music = Some(music);
+                }
+            }
             MenuItemAction::ToggleSpectating => self.spectating = !self.spectating,
             MenuItemAction::EditName => {
                 self.edit_name = !self.edit_name;
@@ -716,6 +739,14 @@ impl Game {
         }
 
         for (y, item) in self.menu() {
+            self.geng.draw2d().quad(
+                framebuffer,
+                &self.ui_camera,
+                Aabb2::point(vec2(0.0, y))
+                    .extend_up(1.0)
+                    .extend_symmetric(vec2(self.assets.config.ui.fov * 2.0, 0.0)),
+                self.assets.config.ui.bg_color,
+            );
             let hovered = cursor.y > y && cursor.y < y + 1.0;
             if hovered && item.action.is_some() {
                 self.geng.draw2d().quad(

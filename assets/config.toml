@@ -17,6 +17,7 @@ ground_highlight_radius = 0.1
 ground_color = "#0004"
 
 [ui]
+bg_color = "#aafa"
 edit_text_color = "#affa"
 fov = 20
 label_color = "#444"
