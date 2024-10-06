@@ -140,6 +140,9 @@ struct Assets {
     #[load(options(filter = "ugli::Filter::Nearest", wrap_mode = "ugli::WrapMode::Repeat"))]
     ruler: ugli::Texture,
     tutorial: Texture,
+    start: geng::Sound,
+    stop: geng::Sound,
+    win: geng::Sound,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -351,6 +354,7 @@ impl Game {
         }
         if baby.pos.y > self.assets.config.track_len - 1.0 {
             self.baby = None;
+            self.assets.win.play();
             self.connection.send(ClientMessage::Finish);
             return;
         }
@@ -480,6 +484,7 @@ impl Game {
                 }
                 ServerMessage::Spawn(pos) => {
                     self.baby = Some(Baby::new(Some(&self.assets), pos));
+                    self.assets.start.play();
                     self.host_race = false;
                     self.timer.reset();
                 }
@@ -808,6 +813,7 @@ impl geng::State for Game {
             geng::Event::KeyPress { key } => {
                 if key == geng::Key::R {
                     self.baby = None;
+                    self.assets.stop.play();
                     self.connection.send(ClientMessage::Despawn);
                 }
                 if key == geng::Key::Enter
