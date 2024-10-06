@@ -130,6 +130,8 @@ struct BabyAssets {
 
 #[derive(geng::asset::Load)]
 struct Assets {
+    #[load(ext = "mp3", options(looped = "true"))]
+    music: geng::Sound,
     #[load(options(filter = "ugli::Filter::Nearest", wrap_mode = "ugli::WrapMode::Repeat"))]
     parents: ugli::Texture,
     config: Config,
@@ -233,6 +235,7 @@ impl Game {
         let ServerMessage::Auth { id: my_id } = connection.next().await.unwrap().unwrap() else {
             unreachable!()
         };
+        assets.music.play();
         Self {
             spectating: false,
             name_updated: true,
