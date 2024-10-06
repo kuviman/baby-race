@@ -10,6 +10,7 @@ pub struct HostedRace {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientServerState {
+    pub name: String,
     pub baby: Option<Baby>,
     pub hosting_race: bool,
     pub joined: Option<ClientId>,
@@ -25,6 +26,7 @@ pub enum ServerMessage {
     Auth {
         id: ClientId,
     },
+    Name(String),
     RaceResult {
         rank: usize,
         time: f32,
@@ -37,6 +39,7 @@ pub enum ClientMessage {
     StartRace,
     Despawn,
     Finish,
+    Name(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

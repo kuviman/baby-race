@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 evenio = "0.6"
 geng.git = "https://github.com/geng-engine/geng"
+rustrict = "0.7.31"
 serde = "1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

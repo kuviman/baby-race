@@ -77,6 +77,18 @@ impl Drop for Client {
 impl geng::net::Receiver<ClientMessage> for Client {
     fn handle(&mut self, message: ClientMessage) {
         match message {
+            ClientMessage::Name(name) => {
+                let name: String = name
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric())
+                    .take(15)
+                    .collect();
+                let name = rustrict::CensorStr::censor(name.as_str());
+                let mut state = self.state.lock().unwrap();
+                let client = state.clients.get_mut(&self.id).unwrap();
+                self.sender.send(ServerMessage::Name(name.clone()));
+                client.name = name;
+            }
             ClientMessage::Finish => {
                 let mut state = self.state.lock().unwrap();
                 let client = state.clients.get_mut(&self.id).unwrap();
@@ -170,6 +182,7 @@ impl geng::net::server::App for App {
         state.clients.insert(
             id,
             ClientServerState {
+                name: "baby".to_owned(),
                 baby: None,
                 hosting_race: false,
                 joined: None,

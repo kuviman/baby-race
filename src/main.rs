@@ -61,6 +61,7 @@ struct OutlineConfig {
 
 #[derive(Deserialize)]
 struct UiConfig {
+    edit_text_color: Rgba<f32>,
     timer_color: Rgba<f32>,
     timer_size: f32,
     fov: f32,
@@ -192,6 +193,9 @@ impl Baby {
 }
 
 struct Game {
+    edit_name: bool,
+    name_updated: bool,
+    name: String,
     dbg: Option<vec2<f32>>,
     hovered_limb: Limb,
     locked_ground_pos: Option<vec2<f32>>,
@@ -222,6 +226,9 @@ impl Game {
             unreachable!()
         };
         Self {
+            name_updated: true,
+            edit_name: false,
+            name: preferences::load("name").unwrap_or("baby".to_owned()),
             finish_time: 0.0,
             hovered_limb: Limb::LeftArm,
             locked_ground_pos: None,
@@ -442,6 +449,7 @@ impl Game {
         for message in new_messages {
             let message = message.expect("server connection failure");
             match message {
+                ServerMessage::Name(name) => self.name = name,
                 ServerMessage::RaceResult { time, rank } => {
                     self.rank = Some(rank);
                     self.finish_time = time;
@@ -475,11 +483,13 @@ impl Game {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 enum MenuItemAction {
     StartRace,
     Host,
     Cancel,
     Join(ClientId),
+    EditName,
 }
 
 struct MenuItem {
@@ -489,8 +499,12 @@ struct MenuItem {
 
 impl Game {
     fn menu(&self) -> Vec<MenuItem> {
+        let mut result = vec![MenuItem {
+            text: format!("your name: {}", self.name),
+            action: Some(MenuItemAction::EditName),
+        }];
         if self.host_race {
-            let mut result = vec![
+            result.extend([
                 MenuItem {
                     text: "Start!".to_owned(),
                     action: Some(MenuItemAction::StartRace),
@@ -507,7 +521,7 @@ impl Game {
                     text: "YOU".to_owned(),
                     action: None,
                 },
-            ];
+            ]);
             for (&id, client) in &self.others {
                 if id == self.my_id {
                     continue;
@@ -521,7 +535,7 @@ impl Game {
             }
             result
         } else if let Some(joined) = self.join_race {
-            let mut result = vec![
+            result.extend([
                 MenuItem {
                     text: "wait for the race to start".to_owned(),
                     action: None,
@@ -538,7 +552,7 @@ impl Game {
                     text: "YOU".to_owned(),
                     action: None,
                 },
-            ];
+            ]);
             for (&id, client) in &self.others {
                 if id == self.my_id {
                     continue;
@@ -552,7 +566,7 @@ impl Game {
             }
             result
         } else {
-            let mut result = vec![
+            result.extend([
                 MenuItem {
                     text: "Start SOLO!".to_owned(),
                     action: Some(MenuItemAction::StartRace),
@@ -565,7 +579,7 @@ impl Game {
                     text: "join race:".to_owned(),
                     action: None,
                 },
-            ];
+            ]);
             for (&id, client) in &self.others {
                 if id == self.my_id {
                     continue;
@@ -599,15 +613,27 @@ impl Game {
             if hovered {
                 if let Some(action) = item.action {
                     self.perform_menu_action(action);
+                    if !matches!(action, MenuItemAction::EditName) {
+                        self.geng.window().stop_text_edit();
+                    }
                     return;
                 }
             }
             y -= 1.0;
         }
+        self.geng.window().stop_text_edit();
     }
 
     fn perform_menu_action(&mut self, action: MenuItemAction) {
         match action {
+            MenuItemAction::EditName => {
+                self.edit_name = !self.edit_name;
+                if self.edit_name {
+                    self.geng.window().start_text_edit(&self.name);
+                } else {
+                    self.geng.window().stop_text_edit();
+                }
+            }
             MenuItemAction::StartRace => self.connection.send(ClientMessage::StartRace),
             MenuItemAction::Host => self.host_race = true,
             MenuItemAction::Cancel => {
@@ -663,7 +689,36 @@ impl Game {
                         .extend_up(1.0)
                         .extend_symmetric(vec2(self.assets.config.ui.fov * 2.0, 0.0)),
                     self.assets.config.ui.hover_color,
-                )
+                );
+            }
+            if item.action == Some(MenuItemAction::EditName) && self.edit_name {
+                self.geng.draw2d().quad(
+                    framebuffer,
+                    &self.ui_camera,
+                    Aabb2::point(vec2(0.0, y))
+                        .extend_up(1.0)
+                        .extend_symmetric(vec2(self.assets.config.ui.fov * 2.0, 0.0)),
+                    self.assets.config.ui.edit_text_color,
+                );
+                let w = font
+                    .measure(
+                        &item.text,
+                        vec2(geng::TextAlign::CENTER, geng::TextAlign::BOTTOM),
+                    )
+                    .unwrap_or(Aabb2::ZERO);
+                if self.timer.elapsed().as_secs_f64().fract() < 0.5 {
+                    font.draw(
+                        framebuffer,
+                        &self.ui_camera,
+                        "|",
+                        vec2(geng::TextAlign::CENTER, geng::TextAlign::BOTTOM),
+                        mat3::translate(vec2(w.max.x, y + self.assets.config.ui.text_offset)),
+                        match item.action {
+                            None => self.assets.config.ui.label_color,
+                            Some(_) => self.assets.config.ui.button_color,
+                        },
+                    );
+                }
             }
             font.draw(
                 framebuffer,
@@ -689,11 +744,24 @@ impl geng::State for Game {
                     self.baby = None;
                     self.connection.send(ClientMessage::Despawn);
                 }
+                if key == geng::Key::Enter
+                    || key == geng::Key::NumpadEnter
+                    || key == geng::Key::Escape
+                {
+                    self.geng.window().stop_text_edit();
+                }
             }
             geng::Event::MousePress {
                 button: geng::MouseButton::Left,
             } => {
                 self.click_menu();
+            }
+            geng::Event::EditText(new_text) => {
+                if self.edit_name {
+                    self.name = new_text;
+                } else {
+                    self.geng.window().stop_text_edit();
+                }
             }
             _ => (),
         }
@@ -765,6 +833,15 @@ impl geng::State for Game {
         self.draw_menu(framebuffer);
     }
     fn update(&mut self, delta_time: f64) {
+        if !self.geng.window().is_editing_text() && self.edit_name {
+            self.edit_name = false;
+            self.name_updated = true;
+            preferences::save("name", &self.name);
+        }
+        if self.name_updated {
+            self.name_updated = false;
+            self.connection.send(ClientMessage::Name(self.name.clone()));
+        }
         if let Some(joined) = self.join_race {
             if self.baby.is_none()
                 && !self
@@ -782,7 +859,7 @@ impl geng::State for Game {
             .camera
             .screen_to_world(self.framebuffer_size, cursor_window_pos.map(|x| x as f32));
         self.baby_control(cursor_pos);
-        if let Some(baby) = &self.baby {
+        if let Some(baby) = &mut self.baby {
             self.camera.center += (baby.pos - self.camera.center)
                 * (delta_time * self.assets.config.camera.speed).min(1.0);
         }
