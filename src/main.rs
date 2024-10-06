@@ -178,6 +178,7 @@ impl Baby {
 }
 
 struct Game {
+    locked_ground_pos: Option<vec2<f32>>,
     rank: Option<usize>,
     my_id: ClientId,
     geng: Geng,
@@ -204,6 +205,7 @@ impl Game {
             unreachable!()
         };
         Self {
+            locked_ground_pos: None,
             rank: None,
             ui_camera: Camera2d {
                 center: vec2::ZERO,
@@ -315,10 +317,13 @@ impl Game {
             let limb = &mut baby.limbs.get_mut(&limb).unwrap();
 
             let old_body_pos = baby.pos + limb_config.body_pos.rotate(baby.rotation);
-            let ground_pos = old_body_pos
-                + limb_config
-                    .touch_ground
-                    .rotate(limb.rotation + baby.rotation);
+            let ground_pos = self.locked_ground_pos.unwrap_or_else(|| {
+                old_body_pos
+                    + limb_config
+                        .touch_ground
+                        .rotate(limb.rotation + baby.rotation)
+            });
+            self.locked_ground_pos = Some(ground_pos);
             let new_body_pos = ground_pos
                 + (old_body_pos - ground_pos - delta).normalize() * limb_config.touch_ground.len();
             limb.rotation =
@@ -338,6 +343,7 @@ impl Game {
             // limb.rotation = angle - limb.angle;
         } else {
             self.locked_limb = None;
+            self.locked_ground_pos = None;
         }
     }
     fn handler_multiplayer(&mut self) {
