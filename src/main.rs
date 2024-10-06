@@ -223,6 +223,7 @@ struct Game {
     baby: Option<Baby>,
     host_race: bool,
     join_race: Option<ClientId>,
+    other_babis: HashMap<ClientId, Baby>,
     others: BTreeMap<ClientId, ClientServerState>,
     camera: Camera2d,
     ui_camera: Camera2d,
@@ -242,6 +243,7 @@ impl Game {
         };
         let music = Some(assets.music.play());
         Self {
+            other_babis: default(),
             music,
             spectating: false,
             name_updated: true,
@@ -500,6 +502,57 @@ impl Game {
                     }));
                 }
                 ServerMessage::Auth { .. } => unreachable!(),
+            }
+        }
+    }
+
+    fn interpolate(&mut self, delta_time: f32) {
+        let updates: HashMap<ClientId, Baby> = self
+            .others
+            .iter()
+            .filter_map(|(&id, other)| {
+                let baby = other.baby.clone()?;
+                Some((id, baby))
+            })
+            .collect();
+        self.other_babis.retain(|id, _| updates.contains_key(id));
+
+        trait Normalize {
+            fn normalize(self) -> Self;
+        }
+
+        impl Normalize for f32 {
+            fn normalize(self) -> Self {
+                self
+            }
+        }
+        impl Normalize for vec2<f32> {
+            fn normalize(self) -> Self {
+                self
+            }
+        }
+        impl Normalize for Angle<f32> {
+            fn normalize(self) -> Self {
+                self.normalized_pi()
+            }
+        }
+
+        fn lerp<T>(delta_time: f32, from: T, to: T) -> T
+        where
+            T: Sub<Output = T> + Mul<f32, Output = T> + Add<Output = T> + Copy + Normalize,
+        {
+            let t = (delta_time / 0.1).min(1.0);
+            (from + (to - from).normalize() * t).normalize()
+        }
+        for (id, update) in updates {
+            let baby = self.other_babis.entry(id).or_insert_with(|| update.clone());
+            baby.pos = lerp(delta_time, baby.pos, update.pos);
+            baby.rotation = lerp(delta_time, baby.rotation, update.rotation);
+            baby.radius = lerp(delta_time, baby.radius, update.radius);
+            baby.head_rotation = lerp(delta_time, baby.head_rotation, update.head_rotation);
+            for (limb, limb_state) in baby.limbs.iter_mut() {
+                let update = &update.limbs[limb];
+                limb_state.rotation = lerp(delta_time, limb_state.rotation, update.rotation);
             }
         }
     }
@@ -892,8 +945,8 @@ impl geng::State for Game {
             self.assets.config.parents_height,
             Rgba::WHITE,
         );
-        for other in self.others.values() {
-            if let Some(baby) = &other.baby {
+        for (id, other) in &self.others {
+            if let Some(baby) = self.other_babis.get(id) {
                 self.draw_baby(framebuffer, baby, false);
                 self.geng.default_font().draw(
                     framebuffer,
@@ -956,6 +1009,8 @@ impl geng::State for Game {
         self.draw_menu(framebuffer);
     }
     fn update(&mut self, delta_time: f64) {
+        let delta_time = delta_time as f32;
+        self.interpolate(delta_time);
         if !self.geng.window().is_editing_text() && self.edit_name {
             self.edit_name = false;
             self.name_updated = true;
@@ -976,7 +1031,6 @@ impl geng::State for Game {
             }
         }
         self.handler_multiplayer();
-        let delta_time = delta_time as f32;
         let cursor_window_pos = self.geng.window().cursor_position().unwrap_or(vec2::ZERO);
         let cursor_pos = self
             .camera
