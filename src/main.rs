@@ -196,6 +196,7 @@ impl Baby {
 }
 
 struct Game {
+    spectating: bool,
     edit_name: bool,
     name_updated: bool,
     name: String,
@@ -228,6 +229,7 @@ impl Game {
             unreachable!()
         };
         Self {
+            spectating: false,
             name_updated: true,
             edit_name: false,
             name: preferences::load("name").unwrap_or("baby".to_owned()),
@@ -494,6 +496,7 @@ enum MenuItemAction {
     Cancel,
     Join(ClientId),
     EditName,
+    ToggleSpectating,
 }
 
 struct MenuItem {
@@ -502,13 +505,13 @@ struct MenuItem {
 }
 
 impl Game {
-    fn menu(&self) -> Vec<MenuItem> {
-        let mut result = vec![MenuItem {
+    fn menu(&self) -> Vec<(f32, MenuItem)> {
+        let mut items = vec![MenuItem {
             text: format!("your name: {}", self.name),
             action: Some(MenuItemAction::EditName),
         }];
         if self.host_race {
-            result.extend([
+            items.extend([
                 MenuItem {
                     text: "Start!".to_owned(),
                     action: Some(MenuItemAction::StartRace),
@@ -531,15 +534,14 @@ impl Game {
                     continue;
                 }
                 if client.joined == Some(self.my_id) {
-                    result.push(MenuItem {
+                    items.push(MenuItem {
                         text: client.name.clone(),
                         action: None,
                     });
                 }
             }
-            result
         } else if let Some(joined) = self.join_race {
-            result.extend([
+            items.extend([
                 MenuItem {
                     text: "wait for the race to start".to_owned(),
                     action: None,
@@ -562,15 +564,14 @@ impl Game {
                     continue;
                 }
                 if client.joined == Some(joined) || id == joined {
-                    result.push(MenuItem {
+                    items.push(MenuItem {
                         text: client.name.clone(),
                         action: None,
                     });
                 }
             }
-            result
         } else {
-            result.extend([
+            items.extend([
                 MenuItem {
                     text: "Start SOLO!".to_owned(),
                     action: Some(MenuItemAction::StartRace),
@@ -589,14 +590,37 @@ impl Game {
                     continue;
                 }
                 if client.hosting_race {
-                    result.push(MenuItem {
+                    items.push(MenuItem {
                         text: client.name.clone(),
                         action: Some(MenuItemAction::Join(id)),
                     });
                 }
             }
-            result
         }
+        let mut result = Vec::new();
+        let mut y = 0.0;
+        for item in items {
+            result.push((y, item));
+            y -= 1.0;
+        }
+        let spectate = (
+            self.assets.config.ui.fov / 2.0 - 1.0,
+            MenuItem {
+                text: if self.spectating {
+                    "stop spectating"
+                } else {
+                    "spectate"
+                }
+                .to_owned(),
+                action: Some(MenuItemAction::ToggleSpectating),
+            },
+        );
+        if self.spectating {
+            return vec![spectate];
+        } else {
+            result.push(spectate);
+        }
+        result
     }
 
     fn click_menu(&mut self) {
@@ -611,8 +635,7 @@ impl Game {
                 .unwrap_or(vec2::ZERO)
                 .map(|x| x as f32),
         );
-        let mut y = 0.0;
-        for item in self.menu() {
+        for (y, item) in self.menu() {
             let hovered = cursor.y > y && cursor.y < y + 1.0;
             if hovered {
                 if let Some(action) = item.action {
@@ -623,13 +646,13 @@ impl Game {
                     return;
                 }
             }
-            y -= 1.0;
         }
         self.geng.window().stop_text_edit();
     }
 
     fn perform_menu_action(&mut self, action: MenuItemAction) {
         match action {
+            MenuItemAction::ToggleSpectating => self.spectating = !self.spectating,
             MenuItemAction::EditName => {
                 self.edit_name = !self.edit_name;
                 if self.edit_name {
@@ -682,8 +705,7 @@ impl Game {
             );
         }
 
-        let mut y = 0.0;
-        for item in self.menu() {
+        for (y, item) in self.menu() {
             let hovered = cursor.y > y && cursor.y < y + 1.0;
             if hovered && item.action.is_some() {
                 self.geng.draw2d().quad(
@@ -735,7 +757,6 @@ impl Game {
                     Some(_) => self.assets.config.ui.button_color,
                 },
             );
-            y -= 1.0;
         }
     }
 }
