@@ -1,7 +1,10 @@
 background_color = "#778C53"
 sensitivity = 0.1
 ruler_color = "white"
-track_len = 20
+track_len = 2
+nametag_color = "#000a"
+nametag_size = 0.5
+nametag_offset = 0.9
 
 [outline]
 scale = 1.1

@@ -77,6 +77,9 @@ struct UiConfig {
 #[derive(geng::asset::Load, Deserialize)]
 #[load(serde = "toml")]
 struct Config {
+    nametag_offset: f32,
+    nametag_color: Rgba<f32>,
+    nametag_size: f32,
     outline: OutlineConfig,
     ui: UiConfig,
     background_color: Rgba<f32>,
@@ -207,7 +210,6 @@ struct Game {
     baby: Option<Baby>,
     host_race: bool,
     join_race: Option<ClientId>,
-    other_babies: BTreeMap<ClientId, Baby>,
     others: BTreeMap<ClientId, ClientServerState>,
     camera: Camera2d,
     ui_camera: Camera2d,
@@ -246,7 +248,6 @@ impl Game {
             geng: geng.clone(),
             assets: assets.clone(),
             baby: None,
-            other_babies: default(),
             camera: Camera2d {
                 center: vec2::ZERO,
                 rotation: Angle::ZERO,
@@ -327,7 +328,11 @@ impl Game {
     }
 
     fn baby_control(&mut self, cursor_pos: vec2<f32>) {
-        let Some(baby) = &mut self.baby else { return };
+        let Some(baby) = &mut self.baby else {
+            self.locked_limb = None;
+            self.locked_ground_pos = None;
+            return;
+        };
         if baby.pos.y < 0.0 {
             baby.pos.y = 0.0;
         }
@@ -336,7 +341,13 @@ impl Game {
             self.connection.send(ClientMessage::Finish);
             return;
         }
-        for other in self.other_babies.values() {
+        for (&id, other) in &self.others {
+            if id == self.my_id {
+                continue;
+            }
+            let Some(other) = &other.baby else {
+                continue;
+            };
             let delta_pos = other.pos - baby.pos;
             let penetration = baby.radius + other.radius - delta_pos.len();
             if delta_pos.len() > 1e-3 && penetration > 0.0 {
@@ -460,17 +471,10 @@ impl Game {
                     self.timer.reset();
                 }
                 ServerMessage::StateSync { clients } => {
-                    self.other_babies = clients
-                        .iter()
-                        .filter_map(|(&id, client)| {
-                            if id == self.my_id {
-                                return None;
-                            }
-                            let baby = client.baby.clone()?;
-                            Some((id, baby))
-                        })
+                    self.others = clients
+                        .into_iter()
+                        .filter(|&(id, _)| id != self.my_id)
                         .collect();
-                    self.others = clients;
                     self.connection.send(ClientMessage::StateSync(ClientState {
                         baby: self.baby.clone(),
                         host_race: self.host_race,
@@ -528,7 +532,7 @@ impl Game {
                 }
                 if client.joined == Some(self.my_id) {
                     result.push(MenuItem {
-                        text: format!("player #{id}"),
+                        text: client.name.clone(),
                         action: None,
                     });
                 }
@@ -559,7 +563,7 @@ impl Game {
                 }
                 if client.joined == Some(joined) || id == joined {
                     result.push(MenuItem {
-                        text: format!("player #{id}"),
+                        text: client.name.clone(),
                         action: None,
                     });
                 }
@@ -586,7 +590,7 @@ impl Game {
                 }
                 if client.hosting_race {
                     result.push(MenuItem {
-                        text: format!("player #{id}"),
+                        text: client.name.clone(),
                         action: Some(MenuItemAction::Join(id)),
                     });
                 }
@@ -794,8 +798,19 @@ impl geng::State for Game {
             self.assets.config.ruler_color,
             ugli::DrawMode::TriangleFan,
         );
-        for baby in self.other_babies.values() {
-            self.draw_baby(framebuffer, baby, false);
+        for other in self.others.values() {
+            if let Some(baby) = &other.baby {
+                self.draw_baby(framebuffer, baby, false);
+                self.geng.default_font().draw(
+                    framebuffer,
+                    &self.camera,
+                    &other.name,
+                    vec2(geng::TextAlign::CENTER, geng::TextAlign::BOTTOM),
+                    mat3::translate(baby.pos + vec2(0.0, self.assets.config.nametag_offset))
+                        * mat3::scale_uniform(self.assets.config.nametag_size),
+                    self.assets.config.nametag_color,
+                );
+            }
         }
         if let Some(baby) = &self.baby {
             self.draw_baby(framebuffer, baby, true);
