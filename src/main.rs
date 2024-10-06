@@ -61,6 +61,8 @@ struct OutlineConfig {
 
 #[derive(Deserialize)]
 struct UiConfig {
+    timer_color: Rgba<f32>,
+    timer_size: f32,
     fov: f32,
     label_color: Rgba<f32>,
     button_color: Rgba<f32>,
@@ -194,6 +196,7 @@ struct Game {
     hovered_limb: Limb,
     locked_ground_pos: Option<vec2<f32>>,
     rank: Option<usize>,
+    finish_time: f32,
     my_id: ClientId,
     geng: Geng,
     assets: Rc<Assets>,
@@ -204,7 +207,7 @@ struct Game {
     others: BTreeMap<ClientId, ClientServerState>,
     camera: Camera2d,
     ui_camera: Camera2d,
-    time: f32,
+    timer: Timer,
     framebuffer_size: vec2<f32>,
     prev_cursor_pos: vec2<f32>,
     connection: Connection,
@@ -219,6 +222,7 @@ impl Game {
             unreachable!()
         };
         Self {
+            finish_time: 0.0,
             hovered_limb: Limb::LeftArm,
             locked_ground_pos: None,
             rank: None,
@@ -241,7 +245,7 @@ impl Game {
                 rotation: Angle::ZERO,
                 fov: Camera2dFov::MinSide(assets.config.camera.fov),
             },
-            time: 0.0,
+            timer: Timer::new(),
             framebuffer_size: vec2::splat(1.0),
             prev_cursor_pos: vec2::ZERO,
             locked_limb: None,
@@ -438,12 +442,14 @@ impl Game {
         for message in new_messages {
             let message = message.expect("server connection failure");
             match message {
-                ServerMessage::RaceResult { rank } => {
+                ServerMessage::RaceResult { time, rank } => {
                     self.rank = Some(rank);
+                    self.finish_time = time;
                 }
                 ServerMessage::Spawn(pos) => {
                     self.baby = Some(Baby::new(Some(&self.assets), pos));
                     self.host_race = false;
+                    self.timer.reset();
                 }
                 ServerMessage::StateSync { clients } => {
                     self.other_babies = clients
@@ -632,10 +638,13 @@ impl Game {
         let font: &geng::Font = self.geng.default_font();
 
         if let Some(rank) = self.rank {
+            let seconds = self.finish_time as i32;
+            let minutes = seconds / 60;
+            let seconds = seconds % 60;
             font.draw(
                 framebuffer,
                 &self.ui_camera,
-                &format!("You placed #{rank}"),
+                &format!("You placed #{rank} (time = {minutes}:{seconds:02})"),
                 vec2(geng::TextAlign::CENTER, geng::TextAlign::BOTTOM),
                 mat3::translate(vec2(0.0, self.assets.config.ui.rank_offset))
                     * mat3::scale_uniform(self.assets.config.ui.rank_size),
@@ -731,6 +740,18 @@ impl geng::State for Game {
                     self.assets.config.outline.ground_color,
                 );
             }
+            let seconds = self.timer.elapsed().as_secs_f64() as i32;
+            let minutes = seconds / 60;
+            let seconds = seconds % 60;
+            self.geng.default_font().draw(
+                framebuffer,
+                &self.ui_camera,
+                &format!("{minutes}:{seconds:02}"),
+                vec2(geng::TextAlign::CENTER, geng::TextAlign::TOP),
+                mat3::translate(vec2(0.0, self.assets.config.ui.fov / 2.0))
+                    * mat3::scale_uniform(self.assets.config.ui.timer_size),
+                self.assets.config.ui.timer_color,
+            );
         }
         if let Some(pos) = self.dbg {
             self.geng.draw2d().circle(
@@ -756,7 +777,6 @@ impl geng::State for Game {
         }
         self.handler_multiplayer();
         let delta_time = delta_time as f32;
-        self.time += delta_time;
         let cursor_window_pos = self.geng.window().cursor_position().unwrap_or(vec2::ZERO);
         let cursor_pos = self
             .camera

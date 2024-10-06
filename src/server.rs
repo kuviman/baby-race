@@ -7,6 +7,7 @@ struct Config {
 }
 
 struct RaceState {
+    start: Timer,
     finished: usize,
 }
 
@@ -85,6 +86,7 @@ impl geng::net::Receiver<ClientMessage> for Client {
                     race.finished += 1;
                     self.sender.send(ServerMessage::RaceResult {
                         rank: race.finished,
+                        time: race.start.elapsed().as_secs_f64() as f32,
                     });
                 }
             }
@@ -106,7 +108,13 @@ impl geng::net::Receiver<ClientMessage> for Client {
                     .collect();
                 let race_id = state.next_race_id;
                 state.next_race_id += 1;
-                state.races.insert(race_id, RaceState { finished: 0 });
+                state.races.insert(
+                    race_id,
+                    RaceState {
+                        start: Timer::new(),
+                        finished: 0,
+                    },
+                );
                 for id in participants {
                     let baby = Baby::new(None, state.find_new_spawn_pos());
                     let client = state.clients.get_mut(&id).unwrap();

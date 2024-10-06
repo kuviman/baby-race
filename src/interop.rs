@@ -27,6 +27,7 @@ pub enum ServerMessage {
     },
     RaceResult {
         rank: usize,
+        time: f32,
     },
 }
 

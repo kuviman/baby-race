@@ -20,6 +20,8 @@ text_offset = 0.2
 rank_color = "#222"
 rank_offset = 2
 rank_size = 2
+timer_color = "black"
+timer_size = 1
 
 [camera]
 fov = 20
