@@ -281,6 +281,13 @@ impl Game {
             self.connection.send(ClientMessage::Finish);
             return;
         }
+        for other in self.other_babies.values() {
+            let delta_pos = other.pos - baby.pos;
+            let penetration = baby.radius + other.radius - delta_pos.len();
+            if delta_pos.len() > 1e-3 && penetration > 0.0 {
+                baby.pos -= delta_pos.normalize() * penetration;
+            }
+        }
         baby.head_rotation = (((cursor_pos - (baby.pos + self.assets.config.baby.head_offset))
             .arg()
             - baby.rotation
