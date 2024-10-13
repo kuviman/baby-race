@@ -23,11 +23,9 @@
             inherit system;
             target.linux.enable = true;
             target.web.enable = true;
-            rust.extensions = pkgs.lib.mkForce [ "rust-src" ];
             packages = with pkgs; [
               just
-              rust-analyzer
-              ((pkgs-stable).butler)
+              (pkgs-stable).butler
             ];
           };
         });
